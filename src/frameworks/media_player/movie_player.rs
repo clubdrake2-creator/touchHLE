@@ -143,9 +143,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)view {
-    nil // TODO
+    // Return a dummy UIView so the game doesn't panic when transitioning
+    msg_class![env; UIView new]
 }
-
+    
 - (MPMoviePlaybackState)playbackState {
     MPMoviePlaybackStateStopped // TODO
 }

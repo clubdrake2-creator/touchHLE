@@ -25,6 +25,7 @@ pub mod ui_image_picker_controller;
 pub mod ui_nib;
 pub mod ui_responder;
 pub mod ui_screen;
+pub mod ui_screen_mode; // --- FIX: Added this to resolve the 'could not find ui_screen_mode' error ---
 pub mod ui_touch;
 pub mod ui_view;
 pub mod ui_view_controller;
@@ -115,10 +116,8 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
                 ui_touch::handle_event(env, event)
             }
             Event::AppWillResignActive => {
-                // --- SAMURAI SMASH FIX ---
-                // We comment out the exit call here because the game sends this event 
-                // after the network check. If we exit, we never reach the menu!
-                log!("Handling app-will-resign-active event: ignoring exit for gameplay.");
+                // --- SAMURAI SMASH FIX: Preventing immediate exit ---
+                log!("Handling app-will-resign-active event: ignoring exit to keep game alive.");
                 // ui_application::exit(env); 
             }
             Event::AppWillTerminate => {

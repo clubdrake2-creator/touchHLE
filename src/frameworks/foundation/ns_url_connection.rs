@@ -6,8 +6,8 @@
 
 //! `NSURLConnection`.
 //!
-//! This is a stub implementation that handles network requests by 
-//! checking for local file fallbacks before reporting a failure.
+//! This is a stub implementation that intercepts specific local file requests
+//! to bypass network-dependency checks in certain games.
 
 use crate::mem::MutPtr;
 use crate::objc::{
@@ -21,12 +21,22 @@ use std::fs;
 const NS_URL_ERROR_DOMAIN: &str = "NSURLErrorDomain";
 const NS_URL_ERROR_NOT_CONNECTED_TO_INTERNET: i32 = -1009;
 
+// ---------------------------------------------------------------------------
+// Host object — stores the delegate so we can call it back.
+// ---------------------------------------------------------------------------
+
 struct NSURLConnectionHostObject {
+    /// `id<NSURLConnectionDelegate>` — retained while the connection is
+    /// alive, released on dealloc / cancel.
     delegate: id,
+    /// Whether the connection has already been cancelled / finished.
     cancelled: bool,
 }
 impl HostObject for NSURLConnectionHostObject {}
 
+// ---------------------------------------------------------------------------
+// Helper — build an NSError for "not connected to internet".
+// ---------------------------------------------------------------------------
 fn make_network_error(env: &mut crate::Environment) -> id {
     let domain = ns_string::from_rust_string(env, NS_URL_ERROR_DOMAIN.to_string());
     autorelease(env, domain);
@@ -65,11 +75,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     env.objc.alloc_object(this, host, &mut env.mem)
 }
 
+// MARK: - canHandleRequest: (class method)
+
 + (bool)canHandleRequest:(id)_request {
     true
 }
 
-// MARK: - Synchronous API (With Local Fallback Fix)
+// MARK: - Synchronous API
 
 + (id)sendSynchronousRequest:(id)request
            returningResponse:(MutPtr<id>)response_ptr
@@ -83,22 +95,33 @@ pub const CLASSES: ClassExports = objc_classes! {
         return empty_data;
     }
 
+    // --- INTERCEPTION FIX START ---
     let url: id = msg![env; request URL];
     let url_str = ns_url::get_url_string(env, url);
     log!("NSURLConnection: Requesting URL: {}", url_str);
 
-    // Intercept Power Rangers Samurai localfeed.xml
+    // Specific fix for Saban's Power Rangers Samurai localfeed.xml requirement
     if url_str.contains("localfeed.xml") {
         let guest_path = "/var/mobile/Applications/00000000-0000-0000-0000-000000000000/SMASH.app/localfeed.xml";
-        let host_path = env.fs.get_host_path(guest_path.into());
+        
+        // Use .borrow() to access Fs inside the NullableBox
+        let host_path = env.fs.borrow().get_host_path(guest_path.into());
 
         if let Ok(content) = fs::read(host_path) {
-            log!("NSURLConnection: Success! Intercepted localfeed.xml from bundle.");
-            if !response_ptr.is_null() { env.mem.write(response_ptr, nil); }
-            if !error_ptr.is_null() { env.mem.write(error_ptr, nil); }
+            log!("NSURLConnection: Successfully intercepted localfeed.xml from bundle.");
+            
+            if !response_ptr.is_null() {
+                env.mem.write(response_ptr, nil); 
+            }
+            // Clear error pointer to signal success to the guest app
+            if !error_ptr.is_null() {
+                env.mem.write(error_ptr, nil);
+            }
+
             return ns_data::create_ns_data(env, content);
         }
     }
+    // --- INTERCEPTION FIX END ---
 
     if !response_ptr.is_null() {
         env.mem.write(response_ptr, nil);
@@ -155,16 +178,22 @@ pub const CLASSES: ClassExports = objc_classes! {
     this
 }
 
+// MARK: - Instance methods
+
 - (())start {
     log!("NSURLConnection start: silently dropping");
 }
 
 - (())cancel {
-    env.objc.borrow_mut::<NSURLConnectionHostObject>(this).cancelled = true;
+    env.objc
+        .borrow_mut::<NSURLConnectionHostObject>(this)
+        .cancelled = true;
 }
 
 - (())dealloc {
-    let delegate = env.objc.borrow::<NSURLConnectionHostObject>(this).delegate;
+    let delegate = env.objc
+        .borrow::<NSURLConnectionHostObject>(this)
+        .delegate;
     release(env, delegate);
     env.objc.dealloc_object(this, &mut env.mem);
 }
@@ -172,3 +201,4 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
 
 };
+

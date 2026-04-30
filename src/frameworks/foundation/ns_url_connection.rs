@@ -92,7 +92,10 @@ pub const CLASSES: ClassExports = objc_classes! {
                                                  MIMEType:nil 
                                     expectedContentLength:content_len_i32 
                                          textEncodingName:nil];
-                env.mem.write(response_ptr, resp);
+                
+                // We wrap 'resp' in autorelease so it stays alive for the game to use it
+                env.mem.write(response_ptr, autorelease(env, resp));
+                
             }
 
             if !error_ptr.is_null() { env.mem.write(error_ptr, nil); }

@@ -95,33 +95,28 @@ pub const CLASSES: ClassExports = objc_classes! {
         return empty_data;
     }
 
-    // --- INTERCEPTION FIX START ---
+    // --- INTERCEPTION FIX ---
     let url: id = msg![env; request URL];
-    let url_str = ns_url::get_url_string(env, url);
+    
+    // Adjusted: use to_rust_string which is the standard name in ns_url
+    let url_str = ns_url::to_rust_string(env, url);
     log!("NSURLConnection: Requesting URL: {}", url_str);
 
-    // Specific fix for Saban's Power Rangers Samurai localfeed.xml requirement
     if url_str.contains("localfeed.xml") {
         let guest_path = "/var/mobile/Applications/00000000-0000-0000-0000-000000000000/SMASH.app/localfeed.xml";
-        
-        // Use .borrow() to access Fs inside the NullableBox
         let host_path = env.fs.borrow().get_host_path(guest_path.into());
 
         if let Ok(content) = fs::read(host_path) {
-            log!("NSURLConnection: Successfully intercepted localfeed.xml from bundle.");
+            log!("NSURLConnection: Successfully intercepted localfeed.xml");
             
-            if !response_ptr.is_null() {
-                env.mem.write(response_ptr, nil); 
-            }
-            // Clear error pointer to signal success to the guest app
-            if !error_ptr.is_null() {
-                env.mem.write(error_ptr, nil);
-            }
+            if !response_ptr.is_null() { env.mem.write(response_ptr, nil); }
+            if !error_ptr.is_null() { env.mem.write(error_ptr, nil); }
 
-            return ns_data::create_ns_data(env, content);
+            // Adjusted: use from_vec which is the standard name in ns_data
+            return ns_data::from_vec(env, content);
         }
     }
-    // --- INTERCEPTION FIX END ---
+    // --- END INTERCEPTION FIX ---
 
     if !response_ptr.is_null() {
         env.mem.write(response_ptr, nil);
@@ -135,8 +130,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 
     let empty_data: id = msg_class![env; NSData data];
     empty_data
-}
-
+                       }
+    
 // MARK: - Asynchronous API
 
 + (id)connectionWithRequest:(id)request

@@ -142,17 +142,16 @@ pub const CLASSES: ClassExports = objc_classes! {
     todo_objc_setter!(this, fullsreen);
 }
 
-- (id)view {
-        // Create the view
-        let view: id = msg_class![env; UIView alloc];
-        let view: id = msg![env; view init];
+    - (id)view {
+        // Create the dummy view
+        let view: id = msg_class![env; UIView new];
         
-        // This stops the view from blocking your "START" button taps
+        // Disable user interaction so taps pass through to the menu below
         () = msg![env; view setUserInteractionEnabled:false];
         
-        autorelease(env, view);
+        // Return the non-blocking view
         view
-}
+    }
         
 - (MPMoviePlaybackState)playbackState {
     MPMoviePlaybackStateStopped // TODO
@@ -253,6 +252,4 @@ pub(super) fn handle_players(env: &mut Environment) {
         // TODO: should there be some user info attached?
         let _: () = msg![env; center postNotificationName:name object:object];
     }
-}
-
-    
+    }

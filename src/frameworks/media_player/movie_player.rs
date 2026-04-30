@@ -204,20 +204,25 @@ pub const CLASSES: ClassExports = objc_classes! {
 @implementation MPMoviePlayerViewController: UIViewController
 
 - (id)initWithContentURL:(id)url {
-    log!(
-        "TODO: [(MPMoviePlayerViewController*){:?} initWithContentURL:{:?} ({:?})] -> nil",
-        this,
-        url,
-        ns_url::to_rust_path(env, url),
-    );
-    release(env, this);
-    nil // TODO
+    log!("MPMoviePlayerViewController: initWithContentURL faked for SMASH.");
+    
+    // 1. DO NOT release(env, this). We need to keep this object alive.
+    
+    // 2. Return 'this' so the game thinks the controller was created successfully.
+    this
+}
+
+// Add this method as well, as games often call it to get the underlying player
+- (id)moviePlayer {
+    // Return the active player from our framework state
+    if let Some(player) = env.framework_state.media_player.movie_player.active_player {
+        return player;
+    }
+    nil
 }
 
 @end
-
-};
-
+    
 /// For use by `NSRunLoop` via [super::handle_players]: check movie players'
 /// status, send notifications if necessary.
 pub(super) fn handle_players(env: &mut Environment) {

@@ -143,10 +143,17 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)view {
-    // Return a dummy UIView so the game doesn't panic when transitioning
-    msg_class![env; UIView new]
+        // Create the view
+        let view: id = msg_class![env; UIView alloc];
+        let view: id = msg![env; view init];
+        
+        // This stops the view from blocking your "START" button taps
+        () = msg![env; view setUserInteractionEnabled:false];
+        
+        autorelease(env, view);
+        view
 }
-    
+        
 - (MPMoviePlaybackState)playbackState {
     MPMoviePlaybackStateStopped // TODO
 }

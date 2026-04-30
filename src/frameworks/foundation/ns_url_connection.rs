@@ -69,7 +69,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     true
 }
 
-// MARK: - Synchronous API
+// MARK: - Synchronous API (With Local Fallback Fix)
 
 + (id)sendSynchronousRequest:(id)request
            returningResponse:(MutPtr<id>)response_ptr
@@ -83,33 +83,22 @@ pub const CLASSES: ClassExports = objc_classes! {
         return empty_data;
     }
 
-    // --- INTERCEPTION LOGIC START ---
     let url: id = msg![env; request URL];
     let url_str = ns_url::get_url_string(env, url);
     log!("NSURLConnection: Requesting URL: {}", url_str);
 
-    // If looking for localfeed.xml, try to read it from the guest bundle
+    // Intercept Power Rangers Samurai localfeed.xml
     if url_str.contains("localfeed.xml") {
         let guest_path = "/var/mobile/Applications/00000000-0000-0000-0000-000000000000/SMASH.app/localfeed.xml";
         let host_path = env.fs.get_host_path(guest_path.into());
 
         if let Ok(content) = fs::read(host_path) {
             log!("NSURLConnection: Success! Intercepted localfeed.xml from bundle.");
-            
-            // If the app expects a response object, we should probably give it a dummy one
-            if !response_ptr.is_null() {
-                // Simplified: apps usually just check if error is nil
-                env.mem.write(response_ptr, nil); 
-            }
-            // Clear the error pointer so the app thinks it succeeded
-            if !error_ptr.is_null() {
-                env.mem.write(error_ptr, nil);
-            }
-
+            if !response_ptr.is_null() { env.mem.write(response_ptr, nil); }
+            if !error_ptr.is_null() { env.mem.write(error_ptr, nil); }
             return ns_data::create_ns_data(env, content);
         }
     }
-    // --- INTERCEPTION LOGIC END ---
 
     if !response_ptr.is_null() {
         env.mem.write(response_ptr, nil);
@@ -125,5 +114,61 @@ pub const CLASSES: ClassExports = objc_classes! {
     empty_data
 }
 
-@implementation_end // Note: ensure the rest of the file (async methods) follows
+// MARK: - Asynchronous API
+
++ (id)connectionWithRequest:(id)request
+                   delegate:(id)delegate {
+    let new: id = msg![env; this alloc];
+    let new: id = msg![env; new initWithRequest:request delegate:delegate];
+    autorelease(env, new);
+    new
+}
+
+- (id)initWithRequest:(id)request
+             delegate:(id)delegate {
+    msg![env;
+        this initWithRequest:request
+                    delegate:delegate
+            startImmediately:true]
+}
+
+- (id)initWithRequest:(id)request
+             delegate:(id)delegate
+     startImmediately:(bool)start_immediately {
+
+    if request == nil {
+        release(env, this);
+        return nil;
+    }
+
+    retain(env, delegate);
+    {
+        let mut host = env.objc.borrow_mut::<NSURLConnectionHostObject>(this);
+        host.delegate  = delegate;
+        host.cancelled = false;
+    }
+
+    if start_immediately {
+        log!("NSURLConnection: request will silently fail (no networking)");
+    }
+
+    this
+}
+
+- (())start {
+    log!("NSURLConnection start: silently dropping");
+}
+
+- (())cancel {
+    env.objc.borrow_mut::<NSURLConnectionHostObject>(this).cancelled = true;
+}
+
+- (())dealloc {
+    let delegate = env.objc.borrow::<NSURLConnectionHostObject>(this).delegate;
+    release(env, delegate);
+    env.objc.dealloc_object(this, &mut env.mem);
+}
+
+@end
+
 };

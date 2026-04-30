@@ -93,9 +93,9 @@ pub const CLASSES: ClassExports = objc_classes! {
                                     expectedContentLength:content_len_i32 
                                          textEncodingName:nil];
                 
-                // We wrap 'resp' in autorelease so it stays alive for the game to use it
-                env.mem.write(response_ptr, autorelease(env, resp));
-                
+                // --- FIX: Sequential borrow to satisfy Rust compiler ---
+                let autoreleased_resp = autorelease(env, resp);
+                env.mem.write(response_ptr, autoreleased_resp);
             }
 
             if !error_ptr.is_null() { env.mem.write(error_ptr, nil); }
@@ -117,13 +117,13 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 
     msg_class![env; NSData data]
-                       }
+}
 
 // MARK: - Asynchronous API
 
 + (id)connectionWithRequest:(id)request
                    delegate:(id)delegate {
-                       let new: id = msg![env; this alloc];
+    let new: id = msg![env; this alloc];
     let new: id = msg![env; new initWithRequest:request delegate:delegate];
     autorelease(env, new);
     new
@@ -144,7 +144,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 
     retain(env, delegate);
-         {
+    {
         let mut host = env.objc.borrow_mut::<NSURLConnectionHostObject>(this);
         host.delegate  = delegate;
         host.cancelled = false;
@@ -167,4 +167,3 @@ pub const CLASSES: ClassExports = objc_classes! {
 @end
     
 };
-               

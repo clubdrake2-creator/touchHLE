@@ -9,7 +9,8 @@
 //! likely to use UIKit in very simple and limited ways, so this implementation
 //! will probably take a lot of shortcuts.
 
-use crate::{msg, Environment};
+use crate::objc::{id, msg, msg_class, nil};
+use crate::Environment;
 use std::time::Instant;
 pub mod ui_accelerometer;
 pub mod ui_activity_indicator_view;
@@ -99,6 +100,7 @@ pub struct State {
 pub fn handle_events(env: &mut Environment) -> Option<Instant> {
     use crate::window::Event;
     use crate::window::TextInputEvent;
+    use crate::frameworks::foundation::ns_string;
 
     loop {
         // NSRunLoop will never call this function in headless mode.
@@ -116,18 +118,17 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
             }
             Event::AppWillResignActive => {
                 // --- SAMURAI SMASH FIX ---
-                log!("Handling app-will-resign-active event: ignoring exit and forcing active state.");
+                log!("Handling app-will-resign-active event: forcing active state.");
                 
-                // 1. Send the "Will Become Active" / "Did Become Active" notifications immediately
-                let center: crate::objc::id = crate::objc::msg_class![env; NSNotificationCenter defaultCenter];
+                let center: id = msg_class![env; NSNotificationCenter defaultCenter];
                 
-                let will_name = crate::frameworks::foundation::ns_string::get_static_str(env, "UIApplicationWillEnterForegroundNotification");
-                let _: () = msg![env; center postNotificationName:will_name object:crate::objc::nil];
+                let will_name = ns_string::get_static_str(env, "UIApplicationWillEnterForegroundNotification");
+                let _: () = msg![env; center postNotificationName:will_name object:nil];
 
-                let did_name = crate::frameworks::foundation::ns_string::get_static_str(env, "UIApplicationDidBecomeActiveNotification");
-                let _: () = msg![env; center postNotificationName:did_name object:crate::objc::nil];
+                let did_name = ns_string::get_static_str(env, "UIApplicationDidBecomeActiveNotification");
+                let _: () = msg![env; center postNotificationName:did_name object:nil];
                 
-                // ui_application::exit(env); // Keep this commented out
+                // ui_application::exit(env); // Prevent exit
             }
             Event::AppWillTerminate => {
                 log!("Handling app-will-terminate event.");
@@ -164,4 +165,4 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
     }
 
     ui_accelerometer::handle_accelerometer(env)
-}
+            }

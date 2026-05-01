@@ -41,6 +41,8 @@ pub const MPMoviePlayerContentPreloadDidFinishNotification: &str =
     "MPMoviePlayerContentPreloadDidFinishNotification";
 pub const MPMoviePlayerScalingModeDidChangeNotification: &str =
     "MPMoviePlayerScalingModeDidChangeNotification";
+pub const MPMoviePlayerLoadStateDidChangeNotification: &str =
+    "MPMoviePlayerLoadStateDidChangeNotification";
 
 pub const CONSTANTS: ConstantExports = &[
     (
@@ -54,6 +56,10 @@ pub const CONSTANTS: ConstantExports = &[
     (
         "_MPMoviePlayerScalingModeDidChangeNotification",
         HostConstant::NSString(MPMoviePlayerScalingModeDidChangeNotification),
+    ),
+    (
+        "_MPMoviePlayerLoadStateDidChangeNotification",
+        HostConstant::NSString(MPMoviePlayerLoadStateDidChangeNotification),
     ),
 ];
 
@@ -84,9 +90,14 @@ pub const CLASSES: ClassExports = objc_classes! {
     retain(env, url);
     env.objc.borrow_mut::<MPMoviePlayerControllerHostObject>(this).content_url = url;
 
-    // Trigger "Preload Finished" almost immediately
+    // Trigger preload notifications almost immediately
     State::get(env).pending_notifications.push_back(
         (MPMoviePlayerContentPreloadDidFinishNotification, this, Instant::now() + Duration::from_millis(10))
+    );
+    
+    // FIX: Send LoadStateDidChange so the game knows the "video" is ready to play
+    State::get(env).pending_notifications.push_back(
+        (MPMoviePlayerLoadStateDidChangeNotification, this, Instant::now() + Duration::from_millis(20))
     );
 
     this
@@ -99,7 +110,6 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)view {
-    // FIX: Return nil. Some games check for a visible movie view and disable buttons.
     // Returning nil ensures the menu UI underneath is the primary target for touches.
     log!("MPMoviePlayerController: Returning nil for view to unblock START button.");
     nil
@@ -120,12 +130,11 @@ pub const CLASSES: ClassExports = objc_classes! {
         env.framework_state.media_player.movie_player.active_player = Some(this);
     }
 
-    // Send the "Finished" notification immediately
-    let notif = (MPMoviePlayerPlaybackDidFinishNotification, this, Instant::now());
+    // Send the "Finished" notification
+    let notif = (MPMoviePlayerPlaybackDidFinishNotification, this, Instant::now() + Duration::from_millis(50));
     State::get(env).pending_notifications.push_back(notif);
 
-    // CRITICAL: Call stop immediately to clear the 'active_player' state.
-    // This tells the game engine the video is officially done.
+    // Call stop to clear the 'active_player' state so the game knows it can proceed
     let _: () = msg![env; this stop];
 }
 
@@ -139,7 +148,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 }
 
-// Stubs for common setters
 - (())setBackgroundColor:(id)color { }
 - (())setScalingMode:(MPMovieScalingMode)mode { }
 - (())setControlStyle:(MPMovieControlStyle)style { }
@@ -153,7 +161,6 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (id)initWithContentURL:(id)url {
     log!("MPMoviePlayerViewController: initWithContentURL faked.");
-    // FIX: Just return 'this'. Rust's 'super' keyword cannot be used here.
     this
 }
 
@@ -186,5 +193,4 @@ pub(super) fn handle_players(env: &mut Environment) {
         let center: id = msg_class![env; NSNotificationCenter defaultCenter];
         let _: () = msg![env; center postNotificationName:name object:object];
     }
-        }
-    
+    }

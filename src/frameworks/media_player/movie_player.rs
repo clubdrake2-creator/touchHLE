@@ -18,10 +18,8 @@ use std::time::{Duration, Instant};
 
 #[derive(Default)]
 pub struct State {
-    active_player: Option<id>,
-    /// Various apps create or start a player and await some kind of notification, 
-    /// but can't handle it if that notification happens immediately.
-    pending_notifications: VecDeque<(&'static str, id, Instant)>,
+    pub active_player: Option<id>,
+    pub pending_notifications: VecDeque<(&'static str, id, Instant)>,
 }
 impl State {
     fn get(env: &mut Environment) -> &mut Self {
@@ -85,7 +83,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     retain(env, url);
     env.objc.borrow_mut::<MPMoviePlayerControllerHostObject>(this).content_url = url;
 
-    // Report that content is preloaded after a tiny delay
     State::get(env).pending_notifications.push_back(
         (MPMoviePlayerContentPreloadDidFinishNotification, this, Instant::now() + Duration::from_millis(100))
     );
@@ -100,12 +97,15 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)view {
-    // Create an invisible view that doesn't block touches
+    // --- FIX: Pull arguments out of the macro call ---
+    let frame = crate::frameworks::uikit::ui_geometry::CGRect::zero();
+    let clear_color: id = msg_class![env; UIColor clearColor];
+    
     let view: id = msg_class![env; UIView alloc];
-    let view: id = msg![env; view initWithFrame:crate::frameworks::uikit::ui_geometry::CGRect::zero()];
+    let view: id = msg![env; view initWithFrame:frame];
     
     () = msg![env; view setUserInteractionEnabled:false];
-    () = msg![env; view setBackgroundColor:msg_class![env; UIColor clearColor]];
+    () = msg![env; view setBackgroundColor:clear_color];
     
     autorelease(env, view);
     view
@@ -126,7 +126,6 @@ pub const CLASSES: ClassExports = objc_classes! {
         env.framework_state.media_player.movie_player.active_player = Some(this);
     }
 
-    // Send the "Finished" signal after a very brief delay to let the engine initialize
     let finish_time = Instant::now() + Duration::from_millis(200);
     let notif = (MPMoviePlayerPlaybackDidFinishNotification, this, finish_time);
     State::get(env).pending_notifications.push_back(notif);
@@ -142,7 +141,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 }
 
-// Stubs for common setters
 - (())setBackgroundColor:(id)color { }
 - (())setScalingMode:(MPMovieScalingMode)mode { }
 - (())setControlStyle:(MPMovieControlStyle)style { }
@@ -155,7 +153,6 @@ pub const CLASSES: ClassExports = objc_classes! {
 @implementation MPMoviePlayerViewController: UIViewController
 
 - (id)initWithContentURL:(id)url {
-    log!("MPMoviePlayerViewController: initWithContentURL faked.");
     this
 }
 
@@ -188,4 +185,4 @@ pub(super) fn handle_players(env: &mut Environment) {
         let center: id = msg_class![env; NSNotificationCenter defaultCenter];
         let _: () = msg![env; center postNotificationName:name object:object];
     }
-}
+    }

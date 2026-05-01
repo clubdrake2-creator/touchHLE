@@ -176,6 +176,12 @@ pub const CLASSES: ClassExports = objc_classes! {
 };
 
 pub(super) fn handle_players(env: &mut Environment) {
+    // FIX: Force the game to stay active.
+    // This overrides the "app-will-resign-active" event that pauses the UI.
+    let center: id = msg_class![env; NSNotificationCenter defaultCenter];
+    let active_notif = ns_string::get_static_str(env, "UIApplicationDidBecomeActiveNotification");
+    let _: () = msg![env; center postNotificationName:active_notif object:nil];
+
     let mut notifs_to_run = Vec::new();
     let pending_notifs = &mut State::get(env).pending_notifications;
     let mut i = 0;

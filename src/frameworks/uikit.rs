@@ -114,7 +114,7 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
             Event::TouchesDown(..) | Event::TouchesMove(..) | Event::TouchesUp(..) => {
                 ui_touch::handle_event(env, event)
             }
-                        Event::AppWillResignActive => {
+            Event::AppWillResignActive => {
                 // --- SAMURAI SMASH FIX ---
                 log!("Handling app-will-resign-active event: ignoring exit and forcing active state.");
                 
@@ -128,8 +128,6 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
                 let _: () = msg![env; center postNotificationName:did_name object:crate::objc::nil];
                 
                 // ui_application::exit(env); // Keep this commented out
-                        }
-            
             }
             Event::AppWillTerminate => {
                 log!("Handling app-will-terminate event.");

@@ -23,7 +23,6 @@ pub mod ui_image_picker_controller;
 pub mod ui_nib;
 pub mod ui_responder;
 pub mod ui_screen;
-pub mod ui_screen_mode; // Make sure this is declared so ui_screen can find it
 pub mod ui_touch;
 pub mod ui_view;
 pub mod ui_view_controller;
@@ -83,7 +82,6 @@ pub struct State {
     ui_color: ui_color::State,
     ui_device: ui_device::State,
     ui_font: ui_font::State,
-    pub ui_geometry: ui_geometry::State, // ADDED: Resolves the error in image 2
     ui_graphics: ui_graphics::State,
     ui_image: ui_image::State,
     ui_screen: ui_screen::State,
@@ -96,6 +94,15 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
     use crate::window::Event;
     use crate::window::TextInputEvent;
     use crate::frameworks::foundation::ns_string;
+
+    // --- SMASH INPUT UNBLOCK FIX ---
+    // Force interaction to be enabled on the key window before processing the loop.
+    let app: id = msg_class![env; UIApplication sharedApplication];
+    let window: id = msg![env; app keyWindow];
+    if !window.is_null() {
+        let _: () = msg![env; window setUserInteractionEnabled:true];
+        let _: bool = msg![env; window endEditing:true]; 
+    }
 
     loop {
         let Some(event) = env.window_mut().pop_event() else {
@@ -111,7 +118,6 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
                 ui_touch::handle_event(env, event)
             }
             Event::AppWillResignActive => {
-                // --- SMASH FIX ---
                 log!("Handling app-will-resign-active event: forcing active state.");
                 
                 let center: id = msg_class![env; NSNotificationCenter defaultCenter];
@@ -121,6 +127,12 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
 
                 let did_name = ns_string::get_static_str(env, "UIApplicationDidBecomeActiveNotification");
                 let _: () = msg![env; center postNotificationName:did_name object:nil];
+
+                // CRITICAL SMASH FIX: Directly notify the app delegate to wake up internal logic.
+                let delegate: id = msg![env; app delegate];
+                if !delegate.is_null() {
+                    let _: () = msg![env; delegate applicationDidBecomeActive:app];
+                }
             }
             Event::AppWillTerminate => {
                 log!("Handling app-will-terminate event.");
@@ -128,7 +140,7 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
             }
             Event::EnterDebugger => {
                 if env.is_debugging_enabled() {
-                    log!("Handling EnterDebugger event.");
+                    log!("Handling EnterDebugger event: entering debugger.");
                     env.enter_debugger(None);
                 }
             }
@@ -155,4 +167,4 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
     }
 
     ui_accelerometer::handle_accelerometer(env)
-                }
+}

@@ -23,7 +23,7 @@ pub mod ui_image_picker_controller;
 pub mod ui_nib;
 pub mod ui_responder;
 pub mod ui_screen;
-pub mod ui_screen_mode; // Added back to resolve E0433 errors
+pub mod ui_screen_mode; // FIXED: Added back to resolve E0433
 pub mod ui_touch;
 pub mod ui_view;
 pub mod ui_view_controller;
@@ -78,19 +78,19 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
 
 #[derive(Default)]
 pub struct State {
-    ui_accelerometer: ui_accelerometer::State,
-    ui_application: ui_application::State,
-    ui_color: ui_color::State,
-    ui_device: ui_device::State,
-    ui_font: ui_font::State,
-    pub ui_geometry: ui_geometry::State, // Added back to resolve E0609 errors
-    ui_graphics: ui_graphics::State,
-    ui_image: ui_image::State,
-    ui_screen: ui_screen::State,
-    pub ui_screen_mode: ui_screen_mode::State, // Added back to resolve E0425 error
-    ui_touch: ui_touch::State,
+    pub ui_accelerometer: ui_accelerometer::State,
+    pub ui_application: ui_application::State,
+    pub ui_color: ui_color::State,
+    pub ui_device: ui_device::State,
+    pub ui_font: ui_font::State,
+    pub ui_geometry: ui_geometry::State, // FIXED: Added back to resolve E0609
+    pub ui_graphics: ui_graphics::State,
+    pub ui_image: ui_image::State,
+    pub ui_screen: ui_screen::State,
+    pub ui_screen_mode: ui_screen_mode::State, // FIXED: Added back to resolve E0425
+    pub ui_touch: ui_touch::State,
     pub ui_view: ui_view::State,
-    ui_responder: ui_responder::State,
+    pub ui_responder: ui_responder::State,
 }
 
 pub fn handle_events(env: &mut Environment) -> Option<Instant> {
@@ -98,7 +98,7 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
     use crate::window::TextInputEvent;
     use crate::frameworks::foundation::ns_string;
 
-    // SMASH INPUT UNBLOCK FIX: Force interaction to be enabled
+    // --- SMASH INPUT UNBLOCK FIX ---
     let app: id = msg_class![env; UIApplication sharedApplication];
     let window: id = msg![env; app keyWindow];
     if !window.is_null() {
@@ -130,7 +130,6 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
                 let did_name = ns_string::get_static_str(env, "UIApplicationDidBecomeActiveNotification");
                 let _: () = msg![env; center postNotificationName:did_name object:nil];
 
-                // Direct Delegate Wake-up
                 let delegate: id = msg![env; app delegate];
                 if !delegate.is_null() {
                     let _: () = msg![env; delegate applicationDidBecomeActive:app];
@@ -169,4 +168,4 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
     }
 
     ui_accelerometer::handle_accelerometer(env)
-                    }
+            }

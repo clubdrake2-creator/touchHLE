@@ -377,4 +377,22 @@ impl GLES for GLES1Native<'_> {
     unsafe fn GetBufferParameteriv(&mut self, target: GLenum, pname: GLenum, params: *mut GLint) { gles11::GetBufferParameteriv(target, pname, params) }
     unsafe fn MapBufferOES(&mut self, target: GLenum, access: GLenum) -> *mut GLvoid { gles11::MapBufferOES(target, access) }
     unsafe fn UnmapBufferOES(&mut self, target: GLenum) -> GLboolean { gles11::UnmapBufferOES(target) }
-                      }
+
+    // OpenGL ES 2.0 Passthrough for These Lumps
+    unsafe fn UseProgram(&mut self, program: GLuint) {
+        gles11::UseProgram(program);
+    }
+
+    unsafe fn CreateProgram(&mut self) -> GLuint {
+        gles11::CreateProgram()
+    }
+
+    unsafe fn AttachShader(&mut self, program: GLuint, shader: GLuint) {
+        gles11::AttachShader(program, shader);
+    }
+
+    unsafe fn LinkProgram(&mut self, program: GLuint) {
+        gles11::LinkProgram(program);
+    }
+    
+}

@@ -8,7 +8,6 @@
 use crate::dyld::{ConstantExports, HostConstant};
 use crate::frameworks::foundation::{ns_string, ns_url, NSInteger};
 use crate::frameworks::uikit::ui_device::UIDeviceOrientation;
-// --- FIX: Import directly from core_graphics to avoid privacy errors ---
 use crate::frameworks::core_graphics::{CGRect, CGPoint, CGSize}; 
 use crate::objc::{
     id, msg, msg_class, nil, objc_classes, release, retain, todo_objc_setter, ClassExports,
@@ -78,15 +77,16 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (id)initWithContentURL:(id)url {
     log!(
-        "MPMoviePlayerController: initWithContentURL faked for SMASH. Path: {:?}",
+        "MPMoviePlayerController: initWithContentURL faked. Path: {:?}",
         ns_url::to_rust_path(env, url),
     );
 
     retain(env, url);
     env.objc.borrow_mut::<MPMoviePlayerControllerHostObject>(this).content_url = url;
 
+    // Trigger "Preload Finished" almost immediately
     State::get(env).pending_notifications.push_back(
-        (MPMoviePlayerContentPreloadDidFinishNotification, this, Instant::now() + Duration::from_millis(100))
+        (MPMoviePlayerContentPreloadDidFinishNotification, this, Instant::now() + Duration::from_millis(10))
     );
 
     this
@@ -99,22 +99,10 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)view {
-    // Construct the frame using the types imported from core_graphics
-    let frame = CGRect {
-        origin: CGPoint { x: 0.0, y: 0.0 },
-        size: CGSize { width: 0.0, height: 0.0 },
-    };
-    
-    let clear_color: id = msg_class![env; UIColor clearColor];
-    
-    let view: id = msg_class![env; UIView alloc];
-    let view: id = msg![env; view initWithFrame:frame];
-    
-    () = msg![env; view setUserInteractionEnabled:false];
-    () = msg![env; view setBackgroundColor:clear_color];
-    
-    autorelease(env, view);
-    view
+    // FIX: Return nil. Some games check for a visible movie view and disable buttons.
+    // Returning nil ensures the menu UI underneath is the primary target for touches.
+    log!("MPMoviePlayerController: Returning nil for view to unblock START button.");
+    nil
 }
 
 - (MPMoviePlaybackState)playbackState {
@@ -132,9 +120,13 @@ pub const CLASSES: ClassExports = objc_classes! {
         env.framework_state.media_player.movie_player.active_player = Some(this);
     }
 
-    let finish_time = Instant::now() + Duration::from_millis(200);
-    let notif = (MPMoviePlayerPlaybackDidFinishNotification, this, finish_time);
+    // Send the "Finished" notification immediately
+    let notif = (MPMoviePlayerPlaybackDidFinishNotification, this, Instant::now());
     State::get(env).pending_notifications.push_back(notif);
+
+    // CRITICAL: Call stop immediately to clear the 'active_player' state.
+    // This tells the game engine the video is officially done.
+    let _: () = msg![env; this stop];
 }
 
 - (())stop {
@@ -147,6 +139,7 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 }
 
+// Stubs for common setters
 - (())setBackgroundColor:(id)color { }
 - (())setScalingMode:(MPMovieScalingMode)mode { }
 - (())setControlStyle:(MPMovieControlStyle)style { }
@@ -159,6 +152,8 @@ pub const CLASSES: ClassExports = objc_classes! {
 @implementation MPMoviePlayerViewController: UIViewController
 
 - (id)initWithContentURL:(id)url {
+    log!("MPMoviePlayerViewController: initWithContentURL faked.");
+    // FIX: Just return 'this'. Rust's 'super' keyword cannot be used here.
     this
 }
 
@@ -191,5 +186,5 @@ pub(super) fn handle_players(env: &mut Environment) {
         let center: id = msg_class![env; NSNotificationCenter defaultCenter];
         let _: () = msg![env; center postNotificationName:name object:object];
     }
-    }
-            
+        }
+    

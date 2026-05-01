@@ -138,12 +138,7 @@ fn objc_msgSend_inner(
     // `Environment`, since `objc_msgSend_inner` is the single chokepoint
     // through which every dispatch (host or guest) must pass.
     //
-    // 128 is a deliberate compromise: real iOS view hierarchies rarely go
-    // deeper than ~50 nested `nextResponder`/`hitTest:` levels, and a small
-    // limit keeps us well clear of Android's 1 MB default thread stack
-    // (each `objc_msgSend_inner` host frame is several KB once Rust adds
-    // local variables, log!() temporaries, and the dispatch trampoline).
-    const MAX_DEPTH: usize = 128;
+    const MAX_DEPTH: usize = 512;
     thread_local! {
         static DISPATCH_DEPTH: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     }
@@ -166,6 +161,12 @@ fn objc_msgSend_inner(
             selector.as_str(&env.mem),
             receiver,
         );
+        // --- PASTE IT HERE ---
+        log!("Recursion
+        failure class: {:?}",
+        ObjC::read_isa(receiver,
+         &env.mem)); 
+        
         env.cpu.regs_mut()[0..2].fill(0);
         return;
     }

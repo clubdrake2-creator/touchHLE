@@ -431,10 +431,7 @@ impl GLES for GLES1Native<'_> {
 
     unsafe fn EnableVertexAttribArray(&mut self, index: GLuint) {
         gles2::EnableVertexAttribArray(index);
-    }
-    // ... existing EnableVertexAttribArray function ...
-    unsafe fn EnableVertexAttribArray(&mut self, index: GLuint) {
-        gles2::EnableVertexAttribArray(index);
+    
     }
 
     // --- PASTE THE NEW ONES HERE ---

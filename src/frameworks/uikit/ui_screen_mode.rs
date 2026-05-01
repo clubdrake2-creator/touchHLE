@@ -8,6 +8,10 @@
 use crate::frameworks::core_graphics::{CGFloat, CGSize};
 use crate::objc::{id, objc_classes, ClassExports, HostObject, NSZonePtr};
 
+// ADDED: The compiler needs this State struct to exist for uikit.rs to build
+#[derive(Default)]
+pub struct State {}
+
 pub struct UIScreenModeHostObject {
     pub size: CGSize,
     pub pixel_aspect_ratio: CGFloat,
@@ -56,8 +60,6 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (id)description {
     let host = env.objc.borrow::<UIScreenModeHostObject>(this);
     
-    // Копируем значения из упакованной структуры в локальные переменные,
-    // чтобы макрос format! не пытался взять невыровненную ссылку.
     let width = host.size.width;
     let height = host.size.height;
     let pixel_aspect_ratio = host.pixel_aspect_ratio;
@@ -77,6 +79,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 /// Allocate a `UIScreenMode` with a specific size and pixel aspect ratio.
 /// For use by `UIScreen` when building its `availableModes` array.
+// FIXED: Added 'pub' so uikit/ui_screen can call this
 pub fn from_size(
     env: &mut crate::Environment,
     size: CGSize,

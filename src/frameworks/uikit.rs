@@ -23,7 +23,7 @@ pub mod ui_image_picker_controller;
 pub mod ui_nib;
 pub mod ui_responder;
 pub mod ui_screen;
-pub mod ui_screen_mode; // FIXED: Added back to resolve E0433
+pub mod ui_screen_mode; 
 pub mod ui_touch;
 pub mod ui_view;
 pub mod ui_view_controller;
@@ -83,11 +83,11 @@ pub struct State {
     pub ui_color: ui_color::State,
     pub ui_device: ui_device::State,
     pub ui_font: ui_font::State,
-    pub ui_geometry: ui_geometry::State, // FIXED: Added back to resolve E0609
+    pub ui_geometry: ui_geometry::State,     // FIXED: Missing field
     pub ui_graphics: ui_graphics::State,
     pub ui_image: ui_image::State,
     pub ui_screen: ui_screen::State,
-    pub ui_screen_mode: ui_screen_mode::State, // FIXED: Added back to resolve E0425
+    pub ui_screen_mode: ui_screen_mode::State, // FIXED: Missing field
     pub ui_touch: ui_touch::State,
     pub ui_view: ui_view::State,
     pub ui_responder: ui_responder::State,
@@ -130,6 +130,7 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
                 let did_name = ns_string::get_static_str(env, "UIApplicationDidBecomeActiveNotification");
                 let _: () = msg![env; center postNotificationName:did_name object:nil];
 
+                // Force SMASH Delegate to wake up
                 let delegate: id = msg![env; app delegate];
                 if !delegate.is_null() {
                     let _: () = msg![env; delegate applicationDidBecomeActive:app];
@@ -168,4 +169,5 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
     }
 
     ui_accelerometer::handle_accelerometer(env)
-            }
+        }
+            

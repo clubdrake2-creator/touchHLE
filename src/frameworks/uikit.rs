@@ -4,14 +4,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 //! The UIKit framework.
-//!
-//! For the time being the focus of this project is on running games, which are
-//! likely to use UIKit in very simple and limited ways, so this implementation
-//! will probably take a lot of shortcuts.
 
 use crate::objc::{id, msg, msg_class, nil};
 use crate::Environment;
 use std::time::Instant;
+
 pub mod ui_accelerometer;
 pub mod ui_activity_indicator_view;
 pub mod ui_application;
@@ -19,13 +16,14 @@ pub mod ui_color;
 pub mod ui_device;
 pub mod ui_event;
 pub mod ui_font;
-pub mod ui_geometry;
+pub mod ui_geometry; // Added back
 pub mod ui_graphics;
 pub mod ui_image;
 pub mod ui_image_picker_controller;
 pub mod ui_nib;
 pub mod ui_responder;
 pub mod ui_screen;
+pub mod ui_screen_mode; // Added back
 pub mod ui_touch;
 pub mod ui_view;
 pub mod ui_view_controller;
@@ -85,25 +83,22 @@ pub struct State {
     ui_color: ui_color::State,
     ui_device: ui_device::State,
     ui_font: ui_font::State,
+    pub ui_geometry: ui_geometry::State, // Added back (needed for malloc_zone)
     ui_graphics: ui_graphics::State,
     ui_image: ui_image::State,
     ui_screen: ui_screen::State,
+    pub ui_screen_mode: ui_screen_mode::State, // Added back
     ui_touch: ui_touch::State,
     pub ui_view: ui_view::State,
     ui_responder: ui_responder::State,
 }
 
-/// For use by `NSRunLoop`: handles any events that have queued up.
-///
-/// Returns the next time this function must be called, if any, e.g. the next
-/// time an accelerometer input is due.
 pub fn handle_events(env: &mut Environment) -> Option<Instant> {
     use crate::window::Event;
     use crate::window::TextInputEvent;
     use crate::frameworks::foundation::ns_string;
 
     loop {
-        // NSRunLoop will never call this function in headless mode.
         let Some(event) = env.window_mut().pop_event() else {
             break;
         };
@@ -117,7 +112,6 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
                 ui_touch::handle_event(env, event)
             }
             Event::AppWillResignActive => {
-                // --- SAMURAI SMASH FIX ---
                 log!("Handling app-will-resign-active event: forcing active state.");
                 
                 let center: id = msg_class![env; NSNotificationCenter defaultCenter];
@@ -127,8 +121,6 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
 
                 let did_name = ns_string::get_static_str(env, "UIApplicationDidBecomeActiveNotification");
                 let _: () = msg![env; center postNotificationName:did_name object:nil];
-                
-                // ui_application::exit(env); // Prevent exit
             }
             Event::AppWillTerminate => {
                 log!("Handling app-will-terminate event.");
@@ -137,9 +129,7 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
             Event::EnterDebugger => {
                 if env.is_debugging_enabled() {
                     log!("Handling EnterDebugger event: entering debugger.");
-                    env.enter_debugger(/* reason: */ None);
-                } else {
-                    log!("Ignoring EnterDebugger event: no debugger connected.");
+                    env.enter_debugger(None);
                 }
             }
             Event::TextInput(text_event) => {
@@ -165,4 +155,4 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
     }
 
     ui_accelerometer::handle_accelerometer(env)
-            }
+    }

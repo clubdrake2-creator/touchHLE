@@ -8,7 +8,8 @@
 use crate::dyld::{ConstantExports, HostConstant};
 use crate::frameworks::foundation::{ns_string, ns_url, NSInteger};
 use crate::frameworks::uikit::ui_device::UIDeviceOrientation;
-use crate::frameworks::uikit::ui_geometry::{CGRect, CGPoint, CGSize}; // Use these for the view frame
+// --- FIX: Import directly from core_graphics to avoid privacy errors ---
+use crate::frameworks::core_graphics::{CGRect, CGPoint, CGSize}; 
 use crate::objc::{
     id, msg, msg_class, nil, objc_classes, release, retain, todo_objc_setter, ClassExports,
     HostObject, NSZonePtr, autorelease,
@@ -84,7 +85,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     retain(env, url);
     env.objc.borrow_mut::<MPMoviePlayerControllerHostObject>(this).content_url = url;
 
-    // Notify that content is ready
     State::get(env).pending_notifications.push_back(
         (MPMoviePlayerContentPreloadDidFinishNotification, this, Instant::now() + Duration::from_millis(100))
     );
@@ -99,7 +99,7 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)view {
-    // Manually construct a zero frame to avoid private import / method issues
+    // Construct the frame using the types imported from core_graphics
     let frame = CGRect {
         origin: CGPoint { x: 0.0, y: 0.0 },
         size: CGSize { width: 0.0, height: 0.0 },
@@ -110,7 +110,6 @@ pub const CLASSES: ClassExports = objc_classes! {
     let view: id = msg_class![env; UIView alloc];
     let view: id = msg![env; view initWithFrame:frame];
     
-    // Disable interaction so the "START" button underneath can be clicked
     () = msg![env; view setUserInteractionEnabled:false];
     () = msg![env; view setBackgroundColor:clear_color];
     
@@ -133,7 +132,6 @@ pub const CLASSES: ClassExports = objc_classes! {
         env.framework_state.media_player.movie_player.active_player = Some(this);
     }
 
-    // Delay the "Finished" signal slightly so the game registers it
     let finish_time = Instant::now() + Duration::from_millis(200);
     let notif = (MPMoviePlayerPlaybackDidFinishNotification, this, finish_time);
     State::get(env).pending_notifications.push_back(notif);
@@ -194,3 +192,4 @@ pub(super) fn handle_players(env: &mut Environment) {
         let _: () = msg![env; center postNotificationName:name object:object];
     }
     }
+            

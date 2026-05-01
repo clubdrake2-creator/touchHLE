@@ -432,5 +432,26 @@ impl GLES for GLES1Native<'_> {
     unsafe fn EnableVertexAttribArray(&mut self, index: GLuint) {
         gles2::EnableVertexAttribArray(index);
     }
-    
-}
+    // ... existing EnableVertexAttribArray function ...
+    unsafe fn EnableVertexAttribArray(&mut self, index: GLuint) {
+        gles2::EnableVertexAttribArray(index);
+    }
+
+    // --- PASTE THE NEW ONES HERE ---
+    unsafe fn GetProgramiv(&mut self, program: GLuint, pname: GLenum, params: *mut GLint) {
+        gles2::GetProgramiv(program, pname, params);
+    }
+
+    unsafe fn GetShaderiv(&mut self, shader: GLuint, pname: GLenum, params: *mut GLint) {
+        gles2::GetShaderiv(shader, pname, params);
+    }
+
+    unsafe fn GetProgramInfoLog(&mut self, program: GLuint, buf_size: GLsizei, length: *mut GLsizei, info_log: *mut GLchar) {
+        gles2::GetProgramInfoLog(program, buf_size, length, info_log);
+    }
+
+    unsafe fn GetShaderInfoLog(&mut self, shader: GLuint, buf_size: GLsizei, length: *mut GLsizei, info_log: *mut GLchar) {
+        gles2::GetShaderInfoLog(shader, buf_size, length, info_log);
+    }
+} // <--- THIS IS THE VERY LAST CHARACTER IN YOUR FILE
+

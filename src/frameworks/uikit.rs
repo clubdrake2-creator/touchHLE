@@ -4,6 +4,10 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/.
  */
 //! The UIKit framework.
+//!
+//! For the time being the focus of this project is on running games, which are
+//! likely to use UIKit in very simple and limited ways, so this implementation
+//! will probably take a lot of shortcuts.
 
 use crate::{msg, Environment};
 use std::time::Instant;
@@ -21,7 +25,6 @@ pub mod ui_image_picker_controller;
 pub mod ui_nib;
 pub mod ui_responder;
 pub mod ui_screen;
-pub mod ui_screen_mode;
 pub mod ui_touch;
 pub mod ui_view;
 pub mod ui_view_controller;
@@ -76,25 +79,29 @@ pub const DYLIB: crate::dyld::HostDylib = crate::dyld::HostDylib {
 
 #[derive(Default)]
 pub struct State {
-    pub ui_accelerometer: ui_accelerometer::State,
-    pub ui_application: ui_application::State,
-    pub ui_color: ui_color::State,
-    pub ui_device: ui_device::State,
-    pub ui_font: ui_font::State,
-    pub ui_geometry: ui_geometry::State, // --- ADDED THIS TO FIX THE ERROR ---
-    pub ui_graphics: ui_graphics::State,
-    pub ui_image: ui_image::State,
-    pub ui_screen: ui_screen::State,
-    pub ui_touch: ui_touch::State,
+    ui_accelerometer: ui_accelerometer::State,
+    ui_application: ui_application::State,
+    ui_color: ui_color::State,
+    ui_device: ui_device::State,
+    ui_font: ui_font::State,
+    ui_graphics: ui_graphics::State,
+    ui_image: ui_image::State,
+    ui_screen: ui_screen::State,
+    ui_touch: ui_touch::State,
     pub ui_view: ui_view::State,
-    pub ui_responder: ui_responder::State,
+    ui_responder: ui_responder::State,
 }
 
+/// For use by `NSRunLoop`: handles any events that have queued up.
+///
+/// Returns the next time this function must be called, if any, e.g. the next
+/// time an accelerometer input is due.
 pub fn handle_events(env: &mut Environment) -> Option<Instant> {
     use crate::window::Event;
     use crate::window::TextInputEvent;
 
     loop {
+        // NSRunLoop will never call this function in headless mode.
         let Some(event) = env.window_mut().pop_event() else {
             break;
         };
@@ -107,10 +114,22 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
             Event::TouchesDown(..) | Event::TouchesMove(..) | Event::TouchesUp(..) => {
                 ui_touch::handle_event(env, event)
             }
-            Event::AppWillResignActive => {
+                        Event::AppWillResignActive => {
                 // --- SAMURAI SMASH FIX ---
-                log!("Handling app-will-resign-active event: ignoring exit.");
-                // ui_application::exit(env); 
+                log!("Handling app-will-resign-active event: ignoring exit and forcing active state.");
+                
+                // 1. Send the "Will Become Active" / "Did Become Active" notifications immediately
+                let center: crate::objc::id = crate::objc::msg_class![env; NSNotificationCenter defaultCenter];
+                
+                let will_name = crate::frameworks::foundation::ns_string::get_static_str(env, "UIApplicationWillEnterForegroundNotification");
+                let _: () = msg![env; center postNotificationName:will_name object:crate::objc::nil];
+
+                let did_name = crate::frameworks::foundation::ns_string::get_static_str(env, "UIApplicationDidBecomeActiveNotification");
+                let _: () = msg![env; center postNotificationName:did_name object:crate::objc::nil];
+                
+                // ui_application::exit(env); // Keep this commented out
+                        }
+            
             }
             Event::AppWillTerminate => {
                 log!("Handling app-will-terminate event.");
@@ -119,22 +138,32 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
             Event::EnterDebugger => {
                 if env.is_debugging_enabled() {
                     log!("Handling EnterDebugger event: entering debugger.");
-                    env.enter_debugger(None);
+                    env.enter_debugger(/* reason: */ None);
+                } else {
+                    log!("Ignoring EnterDebugger event: no debugger connected.");
                 }
             }
             Event::TextInput(text_event) => {
                 let responder = env.framework_state.uikit.ui_responder.first_responder;
                 let class = msg![env; responder class];
                 let ui_text_field_class = env.objc.get_known_class("UITextField", &mut env.mem);
-                if !responder.is_null() && env.objc.class_is_subclass_of(class, ui_text_field_class) {
+                if !responder.is_null() && env.objc.class_is_subclass_of(class, ui_text_field_class)
+                {
                     match text_event {
-                        TextInputEvent::Text(text) => ui_view::ui_control::ui_text_field::handle_text(env, responder, text),
-                        TextInputEvent::Backspace => ui_view::ui_control::ui_text_field::handle_backspace(env, responder),
-                        TextInputEvent::Return => ui_view::ui_control::ui_text_field::handle_return(env, responder),
+                        TextInputEvent::Text(text) => {
+                            ui_view::ui_control::ui_text_field::handle_text(env, responder, text)
+                        }
+                        TextInputEvent::Backspace => {
+                            ui_view::ui_control::ui_text_field::handle_backspace(env, responder)
+                        }
+                        TextInputEvent::Return => {
+                            ui_view::ui_control::ui_text_field::handle_return(env, responder)
+                        }
                     }
                 }
             }
         }
     }
+
     ui_accelerometer::handle_accelerometer(env)
 }

@@ -400,5 +400,37 @@ impl GLES for GLES1Native<'_> {
     unsafe fn LinkProgram(&mut self, program: GLuint) {
         gles2::LinkProgram(program);
     }
+     // Additional GLES 2.0 Passthrough for textures and shaders
+    unsafe fn CreateShader(&mut self, type_: GLenum) -> GLuint {
+        gles2::CreateShader(type_)
+    }
+
+    unsafe fn ShaderSource(&mut self, shader: GLuint, count: GLsizei, string: *const *const GLchar, length: *const GLint) {
+        gles2::ShaderSource(shader, count, string, length);
+    }
+
+    unsafe fn CompileShader(&mut self, shader: GLuint) {
+        gles2::CompileShader(shader);
+    }
+
+    unsafe fn GetUniformLocation(&mut self, program: GLuint, name: *const GLchar) -> GLint {
+        gles2::GetUniformLocation(program, name)
+    }
+
+    unsafe fn Uniform4f(&mut self, location: GLint, v0: GLfloat, v1: GLfloat, v2: GLfloat, v3: GLfloat) {
+        gles2::Uniform4f(location, v0, v1, v2, v3);
+    }
+
+    unsafe fn GetAttribLocation(&mut self, program: GLuint, name: *const GLchar) -> GLint {
+        gles2::GetAttribLocation(program, name)
+    }
+
+    unsafe fn VertexAttribPointer(&mut self, index: GLuint, size: GLint, type_: GLenum, normalized: GLboolean, stride: GLsizei, pointer: *const GLvoid) {
+        gles2::VertexAttribPointer(index, size, type_, normalized, stride, pointer);
+    }
+
+    unsafe fn EnableVertexAttribArray(&mut self, index: GLuint) {
+        gles2::EnableVertexAttribArray(index);
+    }
     
 }

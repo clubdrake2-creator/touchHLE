@@ -8,6 +8,7 @@
 
 use super::gles11_raw as gles11;
 use super::gles11_raw::types::*;
+use super::gles2_raw as gles2; 
 use super::gles_generic::GLES;
 use super::util::{try_decode_pvrtc, PalettedTextureFormat};
 use super::GLESContext;
@@ -380,19 +381,19 @@ impl GLES for GLES1Native<'_> {
 
     // OpenGL ES 2.0 Passthrough for These Lumps
     unsafe fn UseProgram(&mut self, program: GLuint) {
-        gles11::UseProgram(program);
+        gles2::UseProgram(program);
     }
 
     unsafe fn CreateProgram(&mut self) -> GLuint {
-        gles11::CreateProgram()
+        gles2::CreateProgram()
     }
 
     unsafe fn AttachShader(&mut self, program: GLuint, shader: GLuint) {
-        gles11::AttachShader(program, shader);
+        gles2::AttachShader(program, shader);
     }
 
     unsafe fn LinkProgram(&mut self, program: GLuint) {
-        gles11::LinkProgram(program);
+        gles2::LinkProgram(program);
     }
     
 }

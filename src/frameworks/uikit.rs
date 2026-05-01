@@ -16,14 +16,16 @@ pub mod ui_color;
 pub mod ui_device;
 pub mod ui_event;
 pub mod ui_font;
-pub mod ui_geometry; // Added back
+pub mod ui_geometry;
 pub mod ui_graphics;
 pub mod ui_image;
 pub mod ui_image_picker_controller;
 pub mod ui_nib;
 pub mod ui_responder;
 pub mod ui_screen;
-pub mod ui_screen_mode; // Added back
+// REMOVED: pub mod ui_screen_mode; 
+// Reason: ScreenMode is handled inside ui_screen.rs, not a separate file.
+
 pub mod ui_touch;
 pub mod ui_view;
 pub mod ui_view_controller;
@@ -83,11 +85,11 @@ pub struct State {
     ui_color: ui_color::State,
     ui_device: ui_device::State,
     ui_font: ui_font::State,
-    pub ui_geometry: ui_geometry::State, // Added back (needed for malloc_zone)
+    // FIX: ui_geometry does not have a State struct, so we remove it from here.
     ui_graphics: ui_graphics::State,
     ui_image: ui_image::State,
     ui_screen: ui_screen::State,
-    pub ui_screen_mode: ui_screen_mode::State, // Added back
+    // FIX: ui_screen_mode does not have a State struct, so we remove it from here.
     ui_touch: ui_touch::State,
     pub ui_view: ui_view::State,
     ui_responder: ui_responder::State,
@@ -156,3 +158,4 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
 
     ui_accelerometer::handle_accelerometer(env)
     }
+                     

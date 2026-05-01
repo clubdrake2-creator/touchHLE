@@ -30,7 +30,7 @@ impl GLESContext for GLES1NativeContext {
     let gl_ctx = window.create_gl_context(GLVersion::GLES11)?;
     
     // This tells the driver to find the addresses for the 2.0 functions
-    gles2::load_with(|s| gl_ctx.get_proc_address(s) as *const _);
+    gles2::load_with(|s| gl_ctx.0.get_proc_address(s) as *const _);
 
     Ok(Self {
         gl_ctx,

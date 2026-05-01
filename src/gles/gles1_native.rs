@@ -30,7 +30,7 @@ impl GLESContext for GLES1NativeContext {
     let gl_ctx = window.create_gl_context(GLVersion::GLES11)?;
     
     // We use the 'window' object instead of 'gl_ctx' to get the address
-    gles2::load_with(|s| window.get_proc_address(s) as *const _);
+    gles2::load_with(|s| window.get_opengl_proc_address(s) as *const _);
 
     Ok(Self {
         gl_ctx,

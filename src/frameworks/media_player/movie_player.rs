@@ -22,6 +22,7 @@ pub struct State {
     pub active_player: Option<id>,
     pub pending_notifications: VecDeque<(&'static str, id, Instant)>,
 }
+
 impl State {
     fn get(env: &mut Environment) -> &mut Self {
         &mut env.framework_state.media_player.movie_player
@@ -176,27 +177,39 @@ pub const CLASSES: ClassExports = objc_classes! {
 };
 
 pub(super) fn handle_players(env: &mut Environment) {
-    // FIX: Force the game to stay active.
-    // This overrides the "app-will-resign-active" event that pauses the UI.
+    // 1. Force the game to stay active (Heartbeat)
+    // This counters the "app-will-resign-active" logs we see in your console.
     let center: id = msg_class![env; NSNotificationCenter defaultCenter];
     let active_notif = ns_string::get_static_str(env, "UIApplicationDidBecomeActiveNotification");
     let _: () = msg![env; center postNotificationName:active_notif object:nil];
 
+    // 2. Interaction Fix: Manually ensure the window is accepting touches.
+    // If the faked movie player left the window disabled, this forces it back on.
+    let app: id = msg_class![env; UIApplication sharedApplication];
+    let key_window: id = msg![env; app keyWindow];
+    if !key_window.is_null() {
+        let _: () = msg![env; key_window setUserInteractionEnabled:true];
+    }
+
+    // 3. Process notifications that have reached their target time.
     let mut notifs_to_run = Vec::new();
-    let pending_notifs = &mut State::get(env).pending_notifications;
+    let state = State::get(env);
+    
     let mut i = 0;
-    while i < pending_notifs.len() {
-        let (name_str, object, time) = pending_notifs[i];
-        if Instant::now() >= time {
-            notifs_to_run.push((name_str, object));
-            pending_notifs.swap_remove_back(i);
+    while i < state.pending_notifications.len() {
+        if Instant::now() >= state.pending_notifications[i].2 {
+            // notification is ready
+            if let Some((name_str, object, _)) = state.pending_notifications.remove(i) {
+                notifs_to_run.push((name_str, object));
+            }
         } else {
             i += 1;
         }
     }
+
     for (name_str, object) in notifs_to_run {
         let name = ns_string::get_static_str(env, name_str);
         let center: id = msg_class![env; NSNotificationCenter defaultCenter];
         let _: () = msg![env; center postNotificationName:name object:object];
     }
-    }
+        }

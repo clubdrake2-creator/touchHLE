@@ -27,18 +27,17 @@ impl GLESContext for GLES1NativeContext {
     }
 
     fn new(window: &mut Window) -> Result<Self, String> {
-        // 1. Fix the method name to 'create_gl_context'
         let gl_ctx = window.create_gl_context(GLVersion::GLES11)?;
-        
-        // 2. This loads the GLES 2.0 functions from the system
-        gles2::load_with(|s| unsafe { sdl2::video::gl_get_proc_address(s) as *const _ });
+
+        // This uses the exact name suggested by the compiler in your screenshot
+        gles2::load_with(|s| window.gl_get_proc_address(s) as *const _);
 
         Ok(Self {
             gl_ctx,
             is_loaded: false,
         })
     }
-     
+        
     fn make_current<'gl_ctx, 'win: 'gl_ctx>(
         &'gl_ctx mut self,
         window: &'win mut Window,

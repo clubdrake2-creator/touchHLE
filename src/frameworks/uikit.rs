@@ -23,9 +23,7 @@ pub mod ui_image_picker_controller;
 pub mod ui_nib;
 pub mod ui_responder;
 pub mod ui_screen;
-// REMOVED: pub mod ui_screen_mode; 
-// Reason: ScreenMode is handled inside ui_screen.rs, not a separate file.
-
+pub mod ui_screen_mode; // Make sure this is declared so ui_screen can find it
 pub mod ui_touch;
 pub mod ui_view;
 pub mod ui_view_controller;
@@ -85,11 +83,10 @@ pub struct State {
     ui_color: ui_color::State,
     ui_device: ui_device::State,
     ui_font: ui_font::State,
-    // FIX: ui_geometry does not have a State struct, so we remove it from here.
+    pub ui_geometry: ui_geometry::State, // ADDED: Resolves the error in image 2
     ui_graphics: ui_graphics::State,
     ui_image: ui_image::State,
     ui_screen: ui_screen::State,
-    // FIX: ui_screen_mode does not have a State struct, so we remove it from here.
     ui_touch: ui_touch::State,
     pub ui_view: ui_view::State,
     ui_responder: ui_responder::State,
@@ -114,6 +111,7 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
                 ui_touch::handle_event(env, event)
             }
             Event::AppWillResignActive => {
+                // --- SMASH FIX ---
                 log!("Handling app-will-resign-active event: forcing active state.");
                 
                 let center: id = msg_class![env; NSNotificationCenter defaultCenter];
@@ -130,7 +128,7 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
             }
             Event::EnterDebugger => {
                 if env.is_debugging_enabled() {
-                    log!("Handling EnterDebugger event: entering debugger.");
+                    log!("Handling EnterDebugger event.");
                     env.enter_debugger(None);
                 }
             }
@@ -157,5 +155,4 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
     }
 
     ui_accelerometer::handle_accelerometer(env)
-    }
-                     
+                }

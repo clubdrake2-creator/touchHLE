@@ -255,5 +255,9 @@ pub const CONSTANTS: ConstantExports = &[
     ("_UIKeyboardWillHideNotification", HostConstant::NSString(UIKeyboardWillHideNotification)),
     ("_UIKeyboardDidHideNotification", HostConstant::NSString(UIKeyboardDidHideNotification)),
     ("_UIKeyboardBoundsUserInfoKey", HostConstant::NSString(UIKeyboardBoundsUserInfoKey)),
+    // CGFloat window level for the status bar.
+    ("_UIWindowLevelStatusBar", HostConstant::Custom(|env| {
+        env.mem.alloc_and_write(1000.0f32).cast_void().cast_const()
+    })),
 ];
     

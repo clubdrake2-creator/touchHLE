@@ -8,14 +8,13 @@
 use crate::dyld::{ConstantExports, HostConstant};
 use crate::frameworks::foundation::{ns_string, ns_url, NSInteger};
 use crate::frameworks::uikit::ui_device::UIDeviceOrientation;
-use crate::frameworks::core_graphics::{CGRect, CGPoint, CGSize}; 
 use crate::objc::{
-    id, msg, msg_class, nil, objc_classes, release, retain, todo_objc_setter, ClassExports,
-    HostObject, NSZonePtr, autorelease,
+    id, msg, msg_class, nil, objc_classes, release, retain, ClassExports,
+    HostObject, NSZonePtr,
 };
 use crate::Environment;
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 #[derive(Default)]
 pub struct State {
@@ -34,7 +33,6 @@ type MPMovieControlStyle = NSInteger;
 
 type MPMoviePlaybackState = NSInteger;
 const MPMoviePlaybackStateStopped: MPMoviePlaybackState = 0;
-const MPMoviePlaybackStatePlaying: MPMoviePlaybackState = 1;
 
 pub const MPMoviePlayerPlaybackDidFinishNotification: &str =
     "MPMoviePlayerPlaybackDidFinishNotification";
@@ -89,16 +87,14 @@ pub const CLASSES: ClassExports = objc_classes! {
     );
 
     retain(env, url);
-    env.objc.borrow_mut::<MPMoviePlayerControllerHostObject>(this).content_url = url;
+    env.objc.borrow_mut::<MPMoviePlayerControllerHostObject>(this)
+        .content_url = url;
 
-    // Trigger preload notifications almost immediately
+    // Act as if loading immediately completed (Spore Origins waits
+    // for this).
     State::get(env).pending_notifications.push_back(
-        (MPMoviePlayerContentPreloadDidFinishNotification, this, Instant::now() + Duration::from_millis(10))
-    );
-    
-    // FIX: Send LoadStateDidChange so the game knows the "video" is ready to play
-    State::get(env).pending_notifications.push_back(
-        (MPMoviePlayerLoadStateDidChangeNotification, this, Instant::now() + Duration::from_millis(20))
+        (MPMoviePlayerContentPreloadDidFinishNotification,
+         this, Instant::now())
     );
 
     this
@@ -111,32 +107,27 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)view {
-    // Returning nil ensures the menu UI underneath is the primary target for touches.
-    log!("MPMoviePlayerController: Returning nil for view to unblock START button.");
-    nil
+    nil // TODO
 }
 
 - (MPMoviePlaybackState)playbackState {
-    if env.framework_state.media_player.movie_player.active_player == Some(this) {
-        return MPMoviePlaybackStatePlaying;
-    }
-    MPMoviePlaybackStateStopped
+    MPMoviePlaybackStateStopped // TODO
 }
 
 - (())play {
-    log!("MPMoviePlayerController [HyperHLE Fix]: Faking instant playback for SMASH.");
-    
-    if env.framework_state.media_player.movie_player.active_player.is_none() {
+    log!("MPMoviePlayerController: play called for {:?}", this);
+    if env.framework_state.media_player.movie_player
+        .active_player.is_none()
+    {
         retain(env, this);
-        env.framework_state.media_player.movie_player.active_player = Some(this);
+        env.framework_state.media_player.movie_player
+            .active_player = Some(this);
     }
-
-    // Send the "Finished" notification
-    let notif = (MPMoviePlayerPlaybackDidFinishNotification, this, Instant::now() + Duration::from_millis(50));
-    State::get(env).pending_notifications.push_back(notif);
-
-    // Call stop to clear the 'active_player' state so the game knows it can proceed
-    let _: () = msg![env; this stop];
+    // Pretend the video finishes immediately.
+    State::get(env).pending_notifications.push_back(
+        (MPMoviePlayerPlaybackDidFinishNotification,
+         this, Instant::now())
+    );
 }
 
 - (())stop {
@@ -149,12 +140,31 @@ pub const CLASSES: ClassExports = objc_classes! {
     }
 }
 
-- (())setBackgroundColor:(id)color { }
-- (())setScalingMode:(MPMovieScalingMode)mode { }
-- (())setControlStyle:(MPMovieControlStyle)style { }
-- (())setFullscreen:(bool)fullsreen { }
-- (())setMovieControlMode:(NSInteger)_mode { }
-- (())setOrientation:(UIDeviceOrientation)_orientation animated:(bool)_animated { }
+- (id)backgroundColor {
+    msg_class![env; UIColor blackColor] // TODO
+}
+- (())setBackgroundColor:(id)_color {
+    // TODO
+}
+- (())setScalingMode:(MPMovieScalingMode)_mode {
+    // TODO
+}
+- (())setUseApplicationAudioSession:(bool)_use_session {
+    // TODO
+}
+- (())setControlStyle:(MPMovieControlStyle)_style {
+    // TODO
+}
+- (())setFullscreen:(bool)_fullscreen {
+    // TODO
+}
+- (())setMovieControlMode:(NSInteger)_mode {
+    // TODO
+}
+- (())setOrientation:(UIDeviceOrientation)_orientation
+               animated:(bool)_animated {
+    // TODO
+}
 
 @end
 
@@ -162,54 +172,35 @@ pub const CLASSES: ClassExports = objc_classes! {
 
 - (id)initWithContentURL:(id)url {
     log!("MPMoviePlayerViewController: initWithContentURL faked.");
-    this
-}
-
-- (id)moviePlayer {
-    if let Some(player) = env.framework_state.media_player.movie_player.active_player {
-        return player;
-    }
-    nil
+    release(env, this);
+    nil // TODO
 }
 
 @end
-    
+
 };
 
+/// For use by `NSRunLoop` via [super::handle_players]: check movie
+/// players' status, send notifications if necessary.
 pub(super) fn handle_players(env: &mut Environment) {
-    // 1. Force the game to stay active (Heartbeat)
-    // This counters the "app-will-resign-active" logs we see in your console.
-    let center: id = msg_class![env; NSNotificationCenter defaultCenter];
-    let active_notif = ns_string::get_static_str(env, "UIApplicationDidBecomeActiveNotification");
-    let _: () = msg![env; center postNotificationName:active_notif object:nil];
-
-    // 2. Interaction Fix: Manually ensure the window is accepting touches.
-    // If the faked movie player left the window disabled, this forces it back on.
-    let app: id = msg_class![env; UIApplication sharedApplication];
-    let key_window: id = msg![env; app keyWindow];
-    if !key_window.is_null() {
-        let _: () = msg![env; key_window setUserInteractionEnabled:true];
-    }
-
-    // 3. Process notifications that have reached their target time.
     let mut notifs_to_run = Vec::new();
-    let state = State::get(env);
-    
+    let pending_notifs =
+        &mut State::get(env).pending_notifications;
     let mut i = 0;
-    while i < state.pending_notifications.len() {
-        if Instant::now() >= state.pending_notifications[i].2 {
-            // notification is ready
-            if let Some((name_str, object, _)) = state.pending_notifications.remove(i) {
-                notifs_to_run.push((name_str, object));
-            }
+    while i < pending_notifs.len() {
+        let (name_str, object, time) = pending_notifs[i];
+        if Instant::now() >= time {
+            notifs_to_run.push((name_str, object));
+            pending_notifs.swap_remove_back(i);
         } else {
             i += 1;
         }
     }
-
     for (name_str, object) in notifs_to_run {
         let name = ns_string::get_static_str(env, name_str);
-        let center: id = msg_class![env; NSNotificationCenter defaultCenter];
-        let _: () = msg![env; center postNotificationName:name object:object];
+        let center: id =
+            msg_class![env; NSNotificationCenter defaultCenter];
+        let _: () = msg![env; center
+            postNotificationName:name object:object];
     }
-        }
+}

@@ -547,7 +547,13 @@ const UIApplicationWillEnterForegroundNotification: &str = "UIApplicationWillEnt
 const UIApplicationWillResignActiveNotification: &str = "UIApplicationWillResignActiveNotification";
 const UIApplicationWillTerminateNotification: &str = "UIApplicationWillTerminateNotification";
 const UIApplicationLaunchOptionsRemoteNotificationKey: &str = "UIApplicationLaunchOptionsRemoteNotificationKey";
-const UIApplicationDidReceiveMemoryWarningNotification: &str = "UIApplicationDidReceiveMemoryWarningNotification";
+const UIApplicationDidReceiveMemoryWarningNotification: &str =
+    "UIApplicationDidReceiveMemoryWarningNotification";
+const UIApplicationWillChangeStatusBarOrientationNotification: &str =
+    "UIApplicationWillChangeStatusBarOrientationNotification";
+const UIApplicationDidChangeStatusBarOrientationNotification: &str =
+    "UIApplicationDidChangeStatusBarOrientationNotification";
+
 pub const CONSTANTS: ConstantExports = &[
     ("_UIApplicationDidFinishLaunchingNotification", HostConstant::NSString(UIApplicationDidFinishLaunchingNotification)),
     ("_UIApplicationDidBecomeActiveNotification", HostConstant::NSString(UIApplicationDidBecomeActiveNotification)),
@@ -557,6 +563,12 @@ pub const CONSTANTS: ConstantExports = &[
     ("_UIApplicationWillTerminateNotification", HostConstant::NSString(UIApplicationWillTerminateNotification)),
     ("_UIApplicationDidReceiveMemoryWarningNotification", HostConstant::NSString(UIApplicationDidReceiveMemoryWarningNotification)),
     ("_UIApplicationLaunchOptionsRemoteNotificationKey", HostConstant::NSString(UIApplicationLaunchOptionsRemoteNotificationKey)),
+    ("_UIApplicationWillChangeStatusBarOrientationNotification", HostConstant::NSString(UIApplicationWillChangeStatusBarOrientationNotification)),
+    ("_UIApplicationDidChangeStatusBarOrientationNotification", HostConstant::NSString(UIApplicationDidChangeStatusBarOrientationNotification)),
+    // UIBackgroundTaskIdentifier sentinel; 0 on 32-bit iPhone OS.
+    ("_UIBackgroundTaskInvalid", HostConstant::Custom(|env| {
+        env.mem.alloc_and_write(0u32).cast_void().cast_const()
+    })),
 ];
 pub const FUNCTIONS: FunctionExports = &[export_c_func!(UIApplicationMain(_, _, _, _))];
 

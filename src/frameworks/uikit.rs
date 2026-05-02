@@ -98,15 +98,7 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
     use crate::window::TextInputEvent;
     use crate::frameworks::foundation::ns_string;
 
-    // --- SMASH INPUT UNBLOCK FIX ---
     let app: id = msg_class![env; UIApplication sharedApplication];
-    let window: id = msg![env; app keyWindow];
-    if !window.is_null() {
-        // Force the window to be key and interaction-ready
-        let _: () = msg![env; window makeKeyAndVisible]; 
-        let _: () = msg![env; window setUserInteractionEnabled:true];
-        let _: bool = msg![env; window endEditing:true]; 
-    }
 
     loop {
         let Some(event) = env.window_mut().pop_event() else {
@@ -123,9 +115,11 @@ pub fn handle_events(env: &mut Environment) -> Option<Instant> {
             }
             Event::AppWillResignActive => {
                 log!("Handling app-will-resign-active event: forcing active state.");
-                
+
+                env.window_mut().resume_event_polling();
+
                 let center: id = msg_class![env; NSNotificationCenter defaultCenter];
-                
+
                 let will_name = ns_string::get_static_str(env, "UIApplicationWillEnterForegroundNotification");
                 let _: () = msg![env; center postNotificationName:will_name object:nil];
 

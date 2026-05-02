@@ -763,10 +763,10 @@ impl Window {
                     log!("Received app-will-resign-active event.");
                     assert!(self.high_priority_event.is_none());
                     self.high_priority_event = Some(Event::AppWillResignActive);
-                    // For some reason, if we don't pause event polling, we will
-                    // never finish handling the event.
-                    // TODO: Add a mechanism for re-enabling polling, if at some
-                    // point we support returning touchHLE to the foreground.
+                    // Pause event polling while the resign-active event is
+                    // delivered; the handler re-enables it via
+                    // resume_event_polling() when forcing the app back to
+                    // the active state.
                     self.enable_event_polling = false;
                     continue;
                 }
@@ -921,6 +921,12 @@ impl Window {
         self.high_priority_event
             .take()
             .or_else(|| self.event_queue.pop_front())
+    }
+
+    /// Re-enable event polling after it was paused (e.g. by an
+    /// `AppWillResignActive` event when the app returns to the foreground).
+    pub fn resume_event_polling(&mut self) {
+        self.enable_event_polling = true;
     }
 
     fn controller_added(&mut self, joystick_idx: u32) {

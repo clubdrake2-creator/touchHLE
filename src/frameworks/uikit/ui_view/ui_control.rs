@@ -18,8 +18,8 @@ pub mod ui_text_field;
 use crate::frameworks::core_graphics::CGPoint;
 use crate::frameworks::foundation::NSUInteger;
 use crate::objc::{
-    id, impl_HostObject_with_superclass, msg, msg_send, msg_super, nil, objc_classes, release,
-    retain, ClassExports, NSZonePtr, SEL,
+    id, impl_HostObject_with_superclass, msg, msg_class, msg_send, msg_super, nil, objc_classes,
+    release, retain, ClassExports, NSZonePtr, SEL,
 };
 use crate::Environment;
 
@@ -85,8 +85,6 @@ fn send_actions(env: &mut Environment, this: id, event: id, control_event: UICon
         .collect();
 
     for (target, action) in action_targets {
-        assert!(target != nil); // TODO
-
         () = msg![env; this sendAction:action to:target forEvent:event];
     }
 }
@@ -266,31 +264,29 @@ pub const CLASSES: ClassExports = objc_classes! {
 - (())addTarget:(id)target
          action:(SEL)action
 forControlEvents:(UIControlEvents)events {
-    if target == nil {
-        // TODO: when the target is nil, the responder chain is searched for
-        // a suitable target
-        log!(
-            "TODO: [{:?} addTarget:nil action:{:?} forControlEvents:{:?}] (ignored)",
-            target,
-            action,
-            events,
-        );
-        return;
-    }
-    // The target is a *weak* reference!
+    // target may be nil — the responder chain is searched at
+    // dispatch time (in sendAction:to:from:forEvent:).
 
-    // The selector must be for a method with zero to two arguments
     let sel_str = action.as_str(&env.mem);
     let colon_count = sel_str.bytes().filter(|&b| b == b':').count();
     assert!([0, 1, 2].contains(&colon_count));
 
-    env.objc.borrow_mut::<UIControlHostObject>(this).action_targets.push((target, action, events));
+    env.objc.borrow_mut::<UIControlHostObject>(this)
+        .action_targets.push((target, action, events));
 }
 
 - (())sendAction:(SEL)action
               to:(id)target
         forEvent:(id)event { // UIEvent*
-    assert!(target != nil); // TODO
+    // When target is nil, UIApplication walks the responder chain.
+    if target == nil {
+        let app: id = msg_class![env; UIApplication sharedApplication];
+        let _: bool = msg![env; app sendAction:action
+                                            to:nil
+                                          from:this
+                                      forEvent:event];
+        return;
+    }
 
     let sel_str = action.as_str(&env.mem);
     let colon_count = sel_str.bytes().filter(|&b| b == b':').count();

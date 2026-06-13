@@ -1635,6 +1635,16 @@ impl Environment {
                 }
 
                 if count >= BYPASS_LIMIT {
+                    // CRITICAL DIAGNOSTICS: Print out the arguments/selectors being passed to the broken stub
+                    log_no_panic!(
+                        "CRASH DIAGNOSTICS -> PC: {:#x}, LR: {:#x}, R0: {:#x}, R1: {:#x}, R2: {:#x}, R3: {:#x}",
+                        pc, lr,
+                        self.cpu.regs()[0],
+                        self.cpu.regs()[1],
+                        self.cpu.regs()[2],
+                        self.cpu.regs()[3]
+                    );
+
                     panic!(
                         "UndefinedInstruction at {:#x} looped {} times with \
                          LR={:#x}; giving up to avoid hanging. This usually \

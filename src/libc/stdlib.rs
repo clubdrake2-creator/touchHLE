@@ -875,36 +875,6 @@ pub fn strtoul(
         }
     }
 }
-fn wcstoul(
-    env: &mut Environment,
-    nptr: ConstPtr<wchar_t>,
-    endptr: MutPtr<MutPtr<wchar_t>>,
-    base: i32,
-) -> u32 {
-    // TODO: support other locales
-    let ctype_locale = setlocale(env, LC_CTYPE, Ptr::null());
-    assert_eq!(env.mem.read(ctype_locale), b'C');
-
-    let w_string = env.mem.wcstr_at(nptr);
-    assert!(w_string.is_ascii()); // TODO
-
-    assert!(endptr.is_null()); // TODO
-
-    let c_string = env.mem.alloc_and_write_cstr(w_string.as_bytes());
-    // TODO: use str_to_int_inner_generic() instead
-    let res = strtoul(env, c_string.cast_const(), Ptr::null(), base);
-    env.mem.free(c_string.cast());
-    log_dbg!(
-        "wcstoul({:?} ({:?}), {:?}, {}) => {}",
-        nptr,
-        w_string,
-        endptr,
-        base,
-        res
-    );
-    res
-}
-
 fn strtoull(
     env: &mut Environment,
     str: ConstPtr<u8>,
@@ -922,6 +892,40 @@ fn strtoull(
         u32::MAX, // <--- ИСПРАВЛЕНО НА u32::MAX
         |s, base| u64::from_str_radix(s, base).unwrap_or(u64::MAX),
         |num| num.wrapping_neg(),
+    );
+    match parse_res {
+        Ok((res, len)) => {
+            if !endptr.is_null() {
+                env.mem.write(endptr, (str + len).cast_mut());
+            }
+            res
+        }
+        Err(_) => {
+            if !endptr.is_null() {
+                env.mem.write(endptr, str.cast_mut());
+            }
+            0
+        }
+    }
+}
+
+fn strtoll(
+    env: &mut Environment,
+    str: ConstPtr<u8>,
+    endptr: MutPtr<MutPtr<u8>>,
+    base: i32,
+) -> i64 {
+    set_errno(env, 0);
+    let parse_res = str_to_int_inner_generic(
+        env,
+        |env, s, idx| Ok(env.mem.read(s + idx)),
+        |_, _, _| (),
+        str.cast_mut(),
+        0, // starting offset
+        base.try_into().unwrap(),
+        u32::MAX, // max_length
+        |s, base| i64::from_str_radix(s, base).unwrap_or(i64::MAX),
+        |num| num.checked_mul(-1).unwrap_or(i64::MIN),
     );
     match parse_res {
         Ok((res, len)) => {
@@ -1644,8 +1648,10 @@ pub const FUNCTIONS: FunctionExports = &[
     export_c_func!(bsearch(_, _, _, _, _)),
     export_c_func!(strtof(_, _)),
     export_c_func!(strtoul(_, _, _)),
-    export_c_func!(wcstoul(_, _, _)),
     export_c_func!(strtoull(_, _, _)),
+    export_c_func!(strtoll(_, _, _)),
+    export_c_func_aliased!("strtoq", strtoll(_, _, _)),
+    export_c_func_aliased!("strtouq", strtoull(_, _, _)),
     export_c_func!(strtol(_, _, _)),
     export_c_func!(realpath(_, _)),
     export_c_func_aliased!("realpath$DARWIN_EXTSN", realpath(_, _)),

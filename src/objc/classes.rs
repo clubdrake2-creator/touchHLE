@@ -470,6 +470,11 @@ fn substitute_classes(
 }
 
 impl ObjC {
+    /// Iterator over all known classes and their names.
+    pub fn all_classes(&self) -> impl Iterator<Item = (&String, &Class)> {
+        self.classes.iter()
+    }
+
     fn get_class(&self, name: &str, is_metaclass: bool, mem: &Mem) -> Option<Class> {
         let class = self.classes.get(name).copied()?;
         Some(if is_metaclass {
@@ -1107,6 +1112,33 @@ impl ObjC {
                 class = next;
             }
         }
+    }
+
+    /// Check whether `class` is a placeholder for a class touchHLE/HyperHLE
+    /// does not implement (an `UnimplementedClass` host object).
+    pub fn is_unimplemented_class(&self, class: Class) -> bool {
+        if class == nil {
+            return false;
+        }
+        let Some(host_object) = self.get_host_object(class) else {
+            return false;
+        };
+        matches!(
+            host_object.as_any().downcast_ref(),
+            Some(UnimplementedClass { .. })
+        )
+    }
+
+    /// Check whether `class` is a "fake" class (a `FakeClass` host object),
+    /// i.e. one we tolerate the existence of without truly implementing.
+    pub fn is_fake_class(&self, class: Class) -> bool {
+        if class == nil {
+            return false;
+        }
+        let Some(host_object) = self.get_host_object(class) else {
+            return false;
+        };
+        matches!(host_object.as_any().downcast_ref(), Some(FakeClass { .. }))
     }
 
     pub fn get_class_name(&self, class: Class) -> &str {
@@ -2317,19 +2349,6 @@ pub fn class_getProperty(
         return ConstVoidPtr::null();
     };
     let name_string = name_str.to_string();
-
-    let class_name_string = env.objc.get_class_name(cls).to_owned();
-    if class_name_string == "UIScreen" && name_string == "scale" {
-        // Even if [UIScreen scale] is implemented, we're not yet having a
-        // proper support for `objc_property_t`, so we prefer to return NULL
-        // here (e.g. property is not declared).
-        // Some games (such as Mirror's Edge) check for those to conditionally
-        // apply some parameters depending on the iOS version without actually
-        // using the property.
-        // TODO: support `objc_property_t` properly
-        log!("TODO: class_getProperty(UIScreen, scale) -> NULL");
-        return ConstVoidPtr::null();
-    }
 
     // Walk the class hierarchy looking for the property.
     let mut current = cls;

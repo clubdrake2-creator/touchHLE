@@ -83,8 +83,32 @@ fn NSAllocateObject(
     msg![env; class alloc]
 }
 
+/// `NSCopyObject(id object, NSUInteger extraBytes, NSZone *zone)`.
+///
+/// Per Apple's Objective-C Runtime Utilities documentation, NSCopyObject
+/// "Creates an exact copy of an object." It allocates a new instance of the
+/// same class as `object` (plus `extraBytes` of trailing storage) and copies
+/// the original instance's bytes into it, returning the new instance. The
+/// copy is shallow — object-pointer ivars are duplicated as raw pointers — so
+/// classes that build their `-copyWithZone:` on top of NSCopyObject are
+/// responsible for retaining any owned ivars themselves. The `zone` argument
+/// is obsolete on modern runtimes and is ignored. NSCopyObject is deprecated
+/// but plenty of shipping iPhone OS apps still call it from their
+/// `-copyWithZone:` implementations.
+fn NSCopyObject(
+    env: &mut Environment,
+    object: id,
+    extra_bytes: NSUInteger,
+    _zone: NSZonePtr,
+) -> id {
+    env.objc.object_copy(object, extra_bytes, &mut env.mem)
+}
+
 // ДОБАВЛЕН ЭКСПОРТ ФУНКЦИЙ ДЛЯ ДИНАМИЧЕСКОГО ЛИНКЕРА
-pub const FUNCTIONS: FunctionExports = &[export_c_func!(NSAllocateObject(_, _, _))];
+pub const FUNCTIONS: FunctionExports = &[
+    export_c_func!(NSAllocateObject(_, _, _)),
+    export_c_func!(NSCopyObject(_, _, _)),
+];
 
 /// Builds a KVO change dictionary and sends
 /// `observeValueForKeyPath:ofObject:change:context:` to one observer.
@@ -892,6 +916,47 @@ pub const CLASSES: ClassExports = objc_classes! {
         release(env, key);
     }
     result
+}
+
+// Per Apple's NSKeyValueCoding informal protocol
+// (https://developer.apple.com/documentation/objectivec/nsobject/setvaluesforkeys(_:)):
+// "For each key in keyedValues, the corresponding value is set in the
+//  receiver by invoking -setValue:forKey:. The default implementation
+//  substitutes nil for instances of NSNull."
+//
+// This is declared on NSObject (the informal protocol), so *any* object —
+// not just NSDictionary — must respond to it. Real apps rely on this:
+// e.g. Core Data / Unity code sends -setValuesForKeysWithDictionary: to
+// plain model objects (NSManagedObjectModel and friends). We must route
+// through -setValue:forKey: rather than -setObject:forKey: so KVC-only
+// setters and guest overrides are honored. Keys are snapshotted first so
+// side effects of the setters can't invalidate enumeration mid-iteration.
+- (())setValuesForKeysWithDictionary:(id)keyed_values { // NSDictionary *
+    if keyed_values == nil {
+        return;
+    }
+    let key_enum: id = msg![env; keyed_values keyEnumerator];
+    if key_enum == nil {
+        return;
+    }
+    let mut keys: Vec<id> = Vec::new();
+    loop {
+        let next: id = msg![env; key_enum nextObject];
+        if next == nil {
+            break;
+        }
+        retain(env, next);
+        keys.push(next);
+    }
+    let ns_null: id = msg_class![env; NSNull null];
+    for key in keys {
+        let val: id = msg![env; keyed_values objectForKey:key];
+        // Per Apple docs, NSNull is treated as nil. -setValue:forKey:'s own
+        // contract then handles the nil case (setNilValueForKey: / removal).
+        let arg: id = if val == ns_null { nil } else { val };
+        () = msg![env; this setValue:arg forKey:key];
+        release(env, key);
+    }
 }
 
 // MARK: - Key-Value Observing (KVO)

@@ -33,78 +33,169 @@ use std::time::{Duration, Instant};
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub enum DeviceFamily {
     iPhone,
+    iPhone3G,
+    iPhone3GS,
+    iPhone4,
+    iPhone4s,
     iPhone5,
+    iPhone5c,
     iPad,
+    iPad2,
+    iPad3,
+    iPad4,
+    iPad5,
+    iPadMini,
+    iPadMini2,
+    iPadMini3,
+    iPodTouch,
+    iPodTouch2,
+    iPodTouch3,
+    iPodTouch4,
+    iPodTouch5,
 }
 impl std::fmt::Display for DeviceFamily {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self, f)
+        f.write_str(self.display_name())
     }
 }
 impl DeviceFamily {
-    /// Portrait (width, height) in logical points.
-    /// iPhone 5 screen is 1136×640 px retina (2×), so 568×320 pts.
-    pub fn portrait_size(&self) -> (u32, u32) {
+    pub fn display_name(&self) -> &'static str {
         match self {
-            DeviceFamily::iPhone => (320, 480),
-            DeviceFamily::iPhone5 => (320, 568),
-            DeviceFamily::iPad => (768, 1024),
+            DeviceFamily::iPhone => "iPhone",
+            DeviceFamily::iPhone3G => "iPhone 3G",
+            DeviceFamily::iPhone3GS => "iPhone 3GS",
+            DeviceFamily::iPhone4 => "iPhone 4",
+            DeviceFamily::iPhone4s => "iPhone 4s",
+            DeviceFamily::iPhone5 => "iPhone 5",
+            DeviceFamily::iPhone5c => "iPhone 5c",
+            DeviceFamily::iPad => "iPad",
+            DeviceFamily::iPad2 => "iPad 2",
+            DeviceFamily::iPad3 => "iPad 3",
+            DeviceFamily::iPad4 => "iPad 4",
+            DeviceFamily::iPad5 => "iPad 5",
+            DeviceFamily::iPadMini => "iPad mini",
+            DeviceFamily::iPadMini2 => "iPad mini 2",
+            DeviceFamily::iPadMini3 => "iPad mini 3",
+            DeviceFamily::iPodTouch => "iPod touch",
+            DeviceFamily::iPodTouch2 => "iPod touch 2",
+            DeviceFamily::iPodTouch3 => "iPod touch 3",
+            DeviceFamily::iPodTouch4 => "iPod touch 4",
+            DeviceFamily::iPodTouch5 => "iPod touch 5",
         }
     }
+
+    pub fn is_ipad(&self) -> bool {
+        matches!(
+            self,
+            DeviceFamily::iPad
+                | DeviceFamily::iPad2
+                | DeviceFamily::iPad3
+                | DeviceFamily::iPad4
+                | DeviceFamily::iPad5
+                | DeviceFamily::iPadMini
+                | DeviceFamily::iPadMini2
+                | DeviceFamily::iPadMini3
+        )
+    }
+
+    pub fn is_ipod_touch(&self) -> bool {
+        matches!(
+            self,
+            DeviceFamily::iPodTouch
+                | DeviceFamily::iPodTouch2
+                | DeviceFamily::iPodTouch3
+                | DeviceFamily::iPodTouch4
+                | DeviceFamily::iPodTouch5
+        )
+    }
+
+    pub fn is_phone_568(&self) -> bool {
+        matches!(self, DeviceFamily::iPhone5 | DeviceFamily::iPhone5c | DeviceFamily::iPodTouch5)
+    }
+
+    pub fn is_retina(&self) -> bool {
+        matches!(
+            self,
+            DeviceFamily::iPhone4
+                | DeviceFamily::iPhone4s
+                | DeviceFamily::iPhone5
+                | DeviceFamily::iPhone5c
+                | DeviceFamily::iPodTouch4
+                | DeviceFamily::iPodTouch5
+                | DeviceFamily::iPad3
+                | DeviceFamily::iPad4
+                | DeviceFamily::iPad5
+                | DeviceFamily::iPadMini2
+                | DeviceFamily::iPadMini3
+        )
+    }
+
+    /// Portrait (width, height) in logical points.
+    pub fn portrait_size(&self) -> (u32, u32) {
+        if self.is_ipad() {
+            (768, 1024)
+        } else if self.is_phone_568() {
+            (320, 568)
+        } else {
+            (320, 480)
+        }
+    }
+
     /// UIScreen.scale — retina multiplier.
     pub fn scale_factor(&self) -> f32 {
-        match self {
-            DeviceFamily::iPhone => 1.0,
-            DeviceFamily::iPhone5 => 2.0,
-            DeviceFamily::iPad => 1.0,
+        if self.is_retina() {
+            2.0
+        } else {
+            1.0
         }
     }
-    /// hw.machine string returned by sysctl / uname.
+
+    /// sysctl hw.machine / uname machine string.
     pub fn machine_name(&self) -> &'static str {
         match self {
             DeviceFamily::iPhone => "iPhone1,1",
+            DeviceFamily::iPhone3G => "iPhone1,2",
+            DeviceFamily::iPhone3GS => "iPhone2,1",
+            DeviceFamily::iPhone4 => "iPhone3,1",
+            DeviceFamily::iPhone4s => "iPhone4,1",
             DeviceFamily::iPhone5 => "iPhone5,1",
+            DeviceFamily::iPhone5c => "iPhone5,3",
             DeviceFamily::iPad => "iPad1,1",
+            DeviceFamily::iPad2 => "iPad2,1",
+            DeviceFamily::iPad3 => "iPad3,1",
+            DeviceFamily::iPad4 => "iPad3,4",
+            DeviceFamily::iPad5 => "iPad6,11",
+            DeviceFamily::iPadMini => "iPad2,5",
+            DeviceFamily::iPadMini2 => "iPad4,4",
+            DeviceFamily::iPadMini3 => "iPad4,7",
+            DeviceFamily::iPodTouch => "iPod1,1",
+            DeviceFamily::iPodTouch2 => "iPod2,1",
+            DeviceFamily::iPodTouch3 => "iPod3,1",
+            DeviceFamily::iPodTouch4 => "iPod4,1",
+            DeviceFamily::iPodTouch5 => "iPod5,1",
         }
     }
 
     /// Heuristically pick the emulated device family whose screen most closely
     /// matches an arbitrary host screen of `(width, height)` physical pixels.
-    ///
-    /// This powers `--device-family=auto`: the goal isn't pixel-perfect
-    /// faithfulness (we only ever emulate three fixed point grids), but to pick
-    /// the device whose *aspect ratio* is nearest the host's, so the app's
-    /// layout and letterboxing look as natural as possible. We compare in the
-    /// orientation-independent sense by always reducing to (short, long).
-    ///
-    /// Reasoning:
-    /// - iPad      → 3:4   (768×1024), the "boxy" 4:3-ish profile.
-    /// - iPhone    → 2:3   (320×480), the classic pre-iPhone-5 profile.
-    /// - iPhone5   → ~9:16 (320×568 pts, 640×1136 px @2×), the "tall" profile,
-    ///   and the only retina (2×) option, so it best matches dense displays.
-    ///
-    /// A modern phone (e.g. 1080×1920 ≈ 9:16, or 1260×2800 ≈ 9:20) is tall and
-    /// dense, so it lands on iPhone5. A 1920×1080 desktop monitor reduces to
-    /// 9:16 short/long as well and also maps to iPhone5 (the closest tall, the
-    /// retina profile usually looks best when up-scaled). A 4:3 / 3:4 display
-    /// (older tablets, some monitors) maps to iPad.
     pub fn pick_for_screen(width: u32, height: u32) -> DeviceFamily {
         if width == 0 || height == 0 {
-            return DeviceFamily::iPhone;
+            return DeviceFamily::iPhone3GS;
         }
-        // Orientation-independent: compare short:long ratios.
         let (short, long) = if width <= height {
             (width as f32, height as f32)
         } else {
             (height as f32, width as f32)
         };
-        let host_ratio = short / long; // in (0, 1]
-
-        // Candidate short:long ratios, derived from each family's portrait size.
-        const CANDIDATES: [DeviceFamily; 3] =
-            [DeviceFamily::iPad, DeviceFamily::iPhone, DeviceFamily::iPhone5];
-
-        let mut best = DeviceFamily::iPhone;
+        let host_ratio = short / long;
+        const CANDIDATES: [DeviceFamily; 5] = [
+            DeviceFamily::iPhone3GS,
+            DeviceFamily::iPhone4,
+            DeviceFamily::iPhone5,
+            DeviceFamily::iPad2,
+            DeviceFamily::iPad3,
+        ];
+        let mut best = DeviceFamily::iPhone3GS;
         let mut best_dist = f32::INFINITY;
         for family in CANDIDATES {
             let (w, h) = family.portrait_size();
@@ -117,6 +208,58 @@ impl DeviceFamily {
         }
         best
     }
+
+    /// CLI/option canonical name accepted by `--device-family=` and emitted by
+    /// the app picker. Round-trips through `TryFrom<&str>`.
+    pub fn option_name(&self) -> &'static str {
+        match self {
+            DeviceFamily::iPhone => "iphone-2g",
+            DeviceFamily::iPhone3G => "iphone-3g",
+            DeviceFamily::iPhone3GS => "iphone-3gs",
+            DeviceFamily::iPhone4 => "iphone-4",
+            DeviceFamily::iPhone4s => "iphone-4s",
+            DeviceFamily::iPhone5 => "iphone-5",
+            DeviceFamily::iPhone5c => "iphone-5c",
+            DeviceFamily::iPad => "ipad-1",
+            DeviceFamily::iPad2 => "ipad-2",
+            DeviceFamily::iPad3 => "ipad-3",
+            DeviceFamily::iPad4 => "ipad-4",
+            DeviceFamily::iPad5 => "ipad-5",
+            DeviceFamily::iPadMini => "ipad-mini",
+            DeviceFamily::iPadMini2 => "ipad-mini-2",
+            DeviceFamily::iPadMini3 => "ipad-mini-3",
+            DeviceFamily::iPodTouch => "ipod-touch",
+            DeviceFamily::iPodTouch2 => "ipod-touch-2",
+            DeviceFamily::iPodTouch3 => "ipod-touch-3",
+            DeviceFamily::iPodTouch4 => "ipod-touch-4",
+            DeviceFamily::iPodTouch5 => "ipod-touch-5",
+        }
+    }
+
+    /// Every device model the user can pick, in menu/display order. Used by the
+    /// app picker's Quick Options "Device model" selector and by docs.
+    pub const ALL_SELECTABLE: &'static [DeviceFamily] = &[
+        DeviceFamily::iPhone,
+        DeviceFamily::iPhone3G,
+        DeviceFamily::iPhone3GS,
+        DeviceFamily::iPhone4,
+        DeviceFamily::iPhone4s,
+        DeviceFamily::iPhone5,
+        DeviceFamily::iPhone5c,
+        DeviceFamily::iPad,
+        DeviceFamily::iPad2,
+        DeviceFamily::iPad3,
+        DeviceFamily::iPad4,
+        DeviceFamily::iPad5,
+        DeviceFamily::iPadMini,
+        DeviceFamily::iPadMini2,
+        DeviceFamily::iPadMini3,
+        DeviceFamily::iPodTouch,
+        DeviceFamily::iPodTouch2,
+        DeviceFamily::iPodTouch3,
+        DeviceFamily::iPodTouch4,
+        DeviceFamily::iPodTouch5,
+    ];
 }
 impl TryFrom<u64> for DeviceFamily {
     type Error = ();
@@ -131,16 +274,35 @@ impl TryFrom<u64> for DeviceFamily {
 impl TryFrom<&str> for DeviceFamily {
     type Error = ();
     fn try_from(value: &str) -> Result<Self, Self::Error> {
-        match value {
-            "iphone" => Ok(DeviceFamily::iPhone),
-            "iphone5" => Ok(DeviceFamily::iPhone5),
-            "ipad" => Ok(DeviceFamily::iPad),
+        match value.to_ascii_lowercase().as_str() {
+            "iphone" => Ok(DeviceFamily::iPhone3GS),
+            "iphone-2g" | "iphone1,1" => Ok(DeviceFamily::iPhone),
+            "iphone-3g" | "iphone1,2" => Ok(DeviceFamily::iPhone3G),
+            "iphone-3gs" | "iphone2,1" => Ok(DeviceFamily::iPhone3GS),
+            "iphone-4" | "iphone3,1" => Ok(DeviceFamily::iPhone4),
+            "iphone-4s" | "iphone4,1" => Ok(DeviceFamily::iPhone4s),
+            "iphone-5" | "iphone5,1" => Ok(DeviceFamily::iPhone5),
+            "iphone-5c" | "iphone5,3" => Ok(DeviceFamily::iPhone5c),
+            "ipad" => Ok(DeviceFamily::iPad2),
+            "ipad-1" | "ipad1,1" => Ok(DeviceFamily::iPad),
+            "ipad-2" | "ipad2,1" => Ok(DeviceFamily::iPad2),
+            "ipad-3" | "ipad3,1" => Ok(DeviceFamily::iPad3),
+            "ipad-4" | "ipad3,4" => Ok(DeviceFamily::iPad4),
+            "ipad-5" | "ipad6,11" => Ok(DeviceFamily::iPad5),
+            "ipad-mini" | "ipad2,5" => Ok(DeviceFamily::iPadMini),
+            "ipad-mini-2" | "ipad4,4" => Ok(DeviceFamily::iPadMini2),
+            "ipad-mini-3" | "ipad4,7" => Ok(DeviceFamily::iPadMini3),
+            "ipod-touch" | "ipod1,1" => Ok(DeviceFamily::iPodTouch),
+            "ipod-touch-2" | "ipod2,1" => Ok(DeviceFamily::iPodTouch2),
+            "ipod-touch-3" | "ipod3,1" => Ok(DeviceFamily::iPodTouch3),
+            "ipod-touch-4" | "ipod4,1" => Ok(DeviceFamily::iPodTouch4),
+            "ipod-touch-5" | "ipod5,1" => Ok(DeviceFamily::iPodTouch5),
             _ => Err(()),
         }
     }
 }
 
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum DeviceOrientation {
     Portrait,
     PortraitUpsideDown,
@@ -585,12 +747,42 @@ impl Window {
             let x = (in_x - vx as f32) / vw as f32 - 0.5;
             let y = (in_y - vy as f32) / vh as f32 - 0.5;
             // rotate
-            let matrix = window.rotation_matrix().inverse().unwrap();
-            let [x, y] = matrix.transform([x, y]);
+            //
+            // If the final EAGL presentation is not being rotated, the touch
+            // path should not rotate either. Keep hit-testing in the normal
+            // 320x480 UIKit space so EAGLView still receives the event; a
+            // separate UITouch locationInView compatibility path can remap
+            // the coordinates returned to the game.
+            let [x, y] = if std::env::var_os("TOUCHHLE_DISABLE_PRESENT_ROTATION").is_some()
+                || std::env::var_os("TOUCHHLE_DISABLE_TOUCH_ROTATION").is_some()
+            {
+                log_once!(
+                    "TOUCHHLE_DISABLE_TOUCH_ROTATION: not rotating touch hit-test coordinates [this log will only be shown once]"
+                );
+                [x, y]
+            } else {
+                let matrix = window.rotation_matrix().inverse().unwrap();
+                matrix.transform([x, y])
+            };
+
             // back to pixels
             let (out_w, out_h) = window.size_unrotated_unscaled();
-            let out_x = (x + 0.5) * out_w as f32;
-            let out_y = (y + 0.5) * out_h as f32;
+            let mut out_x = (x + 0.5) * out_w as f32;
+            let mut out_y = (y + 0.5) * out_h as f32;
+
+            // Optional hit-test tuning only. Do not use these unless you are
+            // deliberately testing the UIKit hit-test position.
+            if let Ok(offset) = std::env::var("TOUCHHLE_HITTEST_X_OFFSET") {
+                if let Ok(offset) = offset.parse::<f32>() {
+                    out_x += offset;
+                }
+            }
+            if let Ok(offset) = std::env::var("TOUCHHLE_HITTEST_Y_OFFSET") {
+                if let Ok(offset) = offset.parse::<f32>() {
+                    out_y += offset;
+                }
+            }
+
             // Keep the result strictly *inside* the iOS window. CGRect
             // containment is half-open on the high edge (a point with
             // y == bounds.size.height is *outside*), so clamping to the

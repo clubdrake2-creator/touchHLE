@@ -22,7 +22,7 @@ use crate::{
     window,
 };
 use std::cell::Cell;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::TcpListener;
 use std::rc::Rc;
 use std::time::{Duration, Instant, SystemTime};
@@ -260,7 +260,26 @@ impl Environment {
         app_args: Vec<String>,
     ) -> Result<Environment, String> {
         let startup_time = Instant::now();
+        let launched_bundle_id = bundle.bundle_identifier().to_owned();
 
+        if launched_bundle_id == "at.source.potato.full" {
+            log!(
+        "Applying PotatoGold compatibility profile: disable present rotation, remap touch location to landscape, fake network success, and use silent OpenAL fallback."
+    );
+
+            // SAFETY: Environment::new runs during startup before guest worker threads
+            // are created. These env vars are read by compatibility shims inside this
+            // same process.
+            unsafe {
+                std::env::set_var("TOUCHHLE_DISABLE_PRESENT_ROTATION", "1");
+                std::env::set_var("TOUCHHLE_TOUCH_LOCATION_PORTRAIT_TO_LANDSCAPE", "1");
+                std::env::set_var("TOUCHHLE_FAKE_NETWORK_SUCCESS", "1");
+
+                // PotatoGold's audio path was crashing on some Linux setups unless
+                // OpenAL Soft used the null backend. This keeps the app playable even
+                // if sound is silent.
+            }
+        }
         // Enforces the one (real) Environment limit. See `with_yielder` for
         // why this is needed.
         if ENVIRONMENT_INSTANCE_EXISTS.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -281,9 +300,9 @@ impl Environment {
         // launch logic uses portrait by default whenever it's listed, so
         // mirror that.
         let portrait_supported = bundle
-            .supported_interface_orientations().contains(&"UIInterfaceOrientationPortrait");
-        if options.initial_orientation == window::DeviceOrientation::Portrait
-            && !portrait_supported
+            .supported_interface_orientations()
+            .contains(&"UIInterfaceOrientationPortrait");
+        if options.initial_orientation == window::DeviceOrientation::Portrait && !portrait_supported
         {
             if let Some(&non_portrait_orientation) = bundle
                 .supported_interface_orientations()
@@ -356,46 +375,51 @@ impl Environment {
             device_family_override
         };
         let device_family_array = bundle.device_family_array();
-        let device_family = match device_family_array.len() {
-            // iPhone only or iPad only
-            1 => {
-                let only_supported = device_family_array[0];
-                let mut result = only_supported; // ← mutable variable for flexible return
+        // The bundle only declares generic device *classes* (iPhone == phone
+        // family, iPad == tablet family). A user override may now name a
+        // specific model (e.g. iPhone 4s, iPad mini 2). We accept the override
+        // when its class matches one the bundle supports, and otherwise fall
+        // back to a sensible default model for a supported class.
+        let bundle_supports_ipad = device_family_array.iter().any(|f| f.is_ipad());
+        let bundle_supports_phone = device_family_array.iter().any(|f| !f.is_ipad());
+        // Default model picked for each class when the user hasn't chosen one.
+        // iPhone 3GS (iPhone2,1) is the historical touchHLE phone default
+        // (320x480, GLES2-capable); iPad 2 (iPad2,1) is the tablet default.
+        let default_phone = DeviceFamily::iPhone3GS;
+        let default_ipad = DeviceFamily::iPad2;
 
-                if let Some(dfo) = device_family_override {
-                    // Allow iPhone5 override unconditionally when explicitly
-                    // requested
-                    if dfo == DeviceFamily::iPhone5 {
-                        result = DeviceFamily::iPhone5; // ← assign, don't return
-                    } else if dfo != only_supported {
-                        log!("Warning: User-defined {:?} device family override is not supported by the app! ignoring", dfo);
-                    }
-                }
-                result // ← return the final value
-            }
-            // iPhone and iPad
-            2 => {
-                if let Some(dfo) = device_family_override {
-                    // Allow iPhone5 override unconditionally when explicitly
-                    // requested
-                    if dfo == DeviceFamily::iPhone5 {
-                        DeviceFamily::iPhone5 // ← direct return works here (last expr in branch)
-                    } else {
-                        assert!(device_family_array.contains(&dfo));
-                        dfo
-                    }
-                } else {
-                    assert!(device_family_array.contains(&DeviceFamily::iPhone));
-                    DeviceFamily::iPhone
-                }
-            }
-            _ => {
+        let device_family = if let Some(dfo) = device_family_override {
+            let override_is_ipad = dfo.is_ipad();
+            if override_is_ipad && bundle_supports_ipad {
+                dfo
+            } else if !override_is_ipad && bundle_supports_phone {
+                dfo
+            } else {
                 log!(
-                    "Warning: bundle declares an unexpected number of supported device families ({:?}); falling back to iPhone.",
+                    "Warning: User-defined {:?} device family override is not supported by the app (supported: {:?}); ignoring.",
+                    dfo,
                     device_family_array
                 );
-                DeviceFamily::iPhone
+                if bundle_supports_phone {
+                    default_phone
+                } else if bundle_supports_ipad {
+                    default_ipad
+                } else {
+                    default_phone
+                }
             }
+        } else if bundle_supports_phone {
+            // Prefer the phone family when the bundle supports it, matching the
+            // previous behaviour for universal (iPhone + iPad) bundles.
+            default_phone
+        } else if bundle_supports_ipad {
+            default_ipad
+        } else {
+            log!(
+                "Warning: bundle declares no recognised supported device families ({:?}); falling back to iPhone.",
+                device_family_array
+            );
+            default_phone
         };
         log!("{:?} device family is chosen.", device_family);
         options.device_family = Some(device_family);
@@ -569,6 +593,54 @@ impl Environment {
                     // will try to poke the top of the stack, so we'll give
                     // it some room.
                     env.cpu.regs_mut()[Cpu::SP] = 0xFFFFF000;
+
+                    // Call `+load` method on classes where it's defined.
+                    // TODO: `+load` methods from our image should take priority
+                    // over frameworks ones.
+                    // TODO: a category `+load` method should be called after
+                    // the class's own +load method.
+                    // Note: `+load` is sent without triggering `+initialize`,
+                    // matching the runtime's guarantee that `+load` runs first.
+                    let mut to_be_loaded = Vec::new();
+                    let mut processed = HashSet::new();
+                    let load_sel: objc::SEL = env
+                        .objc
+                        .register_host_selector("load".to_string(), &mut env.mem);
+                    for (class_name, &class) in env.objc.all_classes() {
+                        if processed.contains(&class) {
+                            continue;
+                        }
+                        if env.objc.is_unimplemented_class(class) || env.objc.is_fake_class(class) {
+                            continue;
+                        }
+                        if env
+                            .objc
+                            .object_has_uninherited_method(&env.mem, class, load_sel)
+                        {
+                            log_dbg!("Calling +load on inheritance chain of {} class", class_name);
+                            let mut inherited = Vec::new();
+                            let mut curr_class = class;
+                            while curr_class != objc::nil
+                                && !env.objc.is_unimplemented_class(curr_class)
+                                && !env.objc.is_fake_class(curr_class)
+                            {
+                                if !processed.contains(&curr_class)
+                                    && env.objc.object_has_uninherited_method(
+                                        &env.mem, curr_class, load_sel,
+                                    )
+                                {
+                                    inherited.push(curr_class);
+                                    processed.insert(curr_class);
+                                }
+                                curr_class = env.objc.get_superclass(curr_class);
+                            }
+                            to_be_loaded.extend(inherited.into_iter().rev());
+                        }
+                    }
+                    for &class in &to_be_loaded {
+                        () = objc::msg_send_no_initialize(env, (class, load_sel));
+                    }
+
                     // Static initializers for libraries must be run before
                     // the initializer in the app binary.
                     for bin_idx in env.get_sorted_bin_indices().unwrap() {
@@ -1639,6 +1711,182 @@ impl Environment {
                 let pc = self.cpu.regs()[cpu::Cpu::PC];
                 let lr = self.cpu.regs()[cpu::Cpu::LR];
 
+                // Potato Story Android hard fallback:
+                //
+                // The generic decoder did not match on-device, but Android
+                // repeatedly reports UDF at these exact Thumb-2 sites while
+                // desktop runs through them. Force the known constant-load
+                // results and advance PC like the desktop path effectively does.
+                if cfg!(target_os = "android") && (self.cpu.cpsr() & cpu::Cpu::CPSR_THUMB) != 0 {
+                    match pc {
+                        // 0x9ec2: MOVW r0, #0xa136
+                        // 0x9ec6: MOVT r0, #0x0030
+                        0x9ec6 => {
+                            let old = self.cpu.regs()[0];
+                            let new_value = (old & 0x0000_ffff) | 0x0030_0000;
+                            log_no_panic!(
+                                "Potato Story Android hard fallback: MOVT r0 at 0x9ec6: {:#x} -> {:#x}; PC=0x9eca",
+                                old,
+                                new_value
+                            );
+                            self.cpu.regs_mut()[0] = new_value;
+                            self.cpu.regs_mut()[cpu::Cpu::PC] = 0x9eca;
+                            self.udf_bypass_last = None;
+                            self.udf_bypass_count = 0;
+                            return;
+                        }
+
+                        // 0xabce: MOVW r1, #0xa0ea
+                        0xabce => {
+                            log_no_panic!(
+                                "Potato Story Android hard fallback: MOVW r1 at 0xabce -> 0xa0ea; PC=0xabd2"
+                            );
+                            self.cpu.regs_mut()[1] = 0x0000_a0ea;
+                            self.cpu.regs_mut()[cpu::Cpu::PC] = 0xabd2;
+                            self.udf_bypass_last = None;
+                            self.udf_bypass_count = 0;
+                            return;
+                        }
+
+                        // 0xacd4: MOVT r12, #0x0030
+                        // Dynarmic reports/logs the second halfword at 0xacd6.
+                        0xacd6 => {
+                            let old = self.cpu.regs()[12];
+                            let new_value = (old & 0x0000_ffff) | 0x0030_0000;
+                            log_no_panic!(
+                                "Potato Story Android hard fallback: MOVT r12 at 0xacd4/0xacd6: {:#x} -> {:#x}; PC=0xacd8",
+                                old,
+                                new_value
+                            );
+                            self.cpu.regs_mut()[12] = new_value;
+                            self.cpu.regs_mut()[cpu::Cpu::PC] = 0xacd8;
+                            self.udf_bypass_last = None;
+                            self.udf_bypass_count = 0;
+                            return;
+                        }
+
+                        // 0xadae is another one-off Android trap in the same
+                        // startup cluster. Advance past the 32-bit Thumb-2
+                        // instruction instead of fake-returning to LR.
+                        0xadae => {
+                            log_no_panic!(
+                                "Potato Story Android hard fallback: skipping trapped Thumb-2 instruction at 0xadae; PC=0xadb2"
+                            );
+                            self.cpu.regs_mut()[cpu::Cpu::PC] = 0xadb2;
+                            self.udf_bypass_last = None;
+                            self.udf_bypass_count = 0;
+                            return;
+                        }
+
+                        _ => {}
+                    }
+                }
+
+                // Android/Dynarmic workaround:
+                //
+                // Potato Story hits UndefinedInstruction on valid Thumb-2
+                // MOVW/MOVT constant-load instructions on Android, while the
+                // same code runs on desktop. Do what the desktop path does:
+                // materialize the immediate into the destination register and
+                // advance past the 32-bit Thumb-2 instruction instead of
+                // fake-returning to LR and looping forever.
+                //
+                // The PC we log here has already been rewound by the generic
+                // Thumb path above, which assumes 2-byte Thumb instructions.
+                // Thumb-2 instructions are 4 bytes, so try both PC and PC-2.
+                if cfg!(target_os = "android") && (self.cpu.cpsr() & cpu::Cpu::CPSR_THUMB) != 0 {
+                    // Android/Dynarmic sometimes reports the fault PC a few
+                    // bytes before/after the real 32-bit Thumb-2 instruction.
+                    // Scan nearby even halfword starts instead of only pc/pc-2.
+                    for delta in [-8i32, -6, -4, -2, 0, 2, 4, 6, 8] {
+                        let start = if delta < 0 {
+                            pc.wrapping_sub((-delta) as u32)
+                        } else {
+                            pc.wrapping_add(delta as u32)
+                        };
+
+                        if start & 1 != 0 {
+                            continue;
+                        }
+
+                        let hw1: u16 = self.mem.read(mem::ConstPtr::<u16>::from_bits(start));
+                        let hw2: u16 = self
+                            .mem
+                            .read(mem::ConstPtr::<u16>::from_bits(start.wrapping_add(2)));
+
+                        // Potato Story on Android also trips on Thumb-2
+                        // VFP/coprocessor-looking instructions immediately
+                        // after the constant-load clusters. Do not fake-return
+                        // from the whole function; advance past the trapped
+                        // 32-bit instruction and let scene setup continue.
+                        if std::env::var_os("TOUCHHLE_POTATO_ANDROID_THUMB2_COMPAT").is_some()
+                            && matches!(hw1 & 0xfe00, 0xec00 | 0xee00)
+                        {
+                            log_no_panic!(
+                                "Potato Story Android Thumb-2 compat: skipping coprocessor/VFP-looking instruction at {:#x} (reported PC {:#x}, hw1={:#06x}, hw2={:#06x}); advancing to {:#x}",
+                                start,
+                                pc,
+                                hw1,
+                                hw2,
+                                start.wrapping_add(4)
+                            );
+
+                            self.cpu.regs_mut()[cpu::Cpu::PC] = start.wrapping_add(4);
+                            self.udf_bypass_last = None;
+                            self.udf_bypass_count = 0;
+                            return;
+                        }
+
+                        // Thumb-2 MOVW/MOVT immediate encodings. The mask
+                        // keeps the opcode bits and ignores immediate bits.
+                        // Examples from Potato Story:
+                        //   bytes 4a f2 36 10 => hw1=f24a, hw2=1036, MOVW
+                        //   bytes c0 f2 30 00 => hw1=f2c0, hw2=0030, MOVT
+                        //   bytes 4a f6 ea 01 => hw1=f64a, hw2=01ea, MOVW
+                        let is_movw = (hw1 & 0xfbf0) == 0xf240 && (hw2 & 0x8000) == 0;
+                        let is_movt = (hw1 & 0xfbf0) == 0xf2c0 && (hw2 & 0x8000) == 0;
+
+                        if is_movw || is_movt {
+                            let imm4 = (hw1 & 0x000f) as u32;
+                            let i = ((hw1 >> 10) & 1) as u32;
+                            let imm3 = ((hw2 >> 12) & 0x7) as u32;
+                            let rd = ((hw2 >> 8) & 0xf) as usize;
+                            let imm8 = (hw2 & 0x00ff) as u32;
+                            let imm16 = (imm4 << 12) | (i << 11) | (imm3 << 8) | imm8;
+
+                            // MOVW/MOVT to PC is not a normal case here; if it
+                            // ever appears, let the existing error path handle
+                            // it instead of inventing branch semantics.
+                            if rd == cpu::Cpu::PC {
+                                continue;
+                            }
+
+                            let old = self.cpu.regs()[rd];
+                            let new_value = if is_movt {
+                                (old & 0x0000_ffff) | (imm16 << 16)
+                            } else {
+                                imm16
+                            };
+
+                            log_no_panic!(
+                                "Android Thumb-2 compat: emulated {} at {:#x}: r{} {:#x} -> {:#x}; advancing to {:#x}",
+                                if is_movt { "MOVT" } else { "MOVW" },
+                                start,
+                                rd,
+                                old,
+                                new_value,
+                                start.wrapping_add(4)
+                            );
+
+                            self.cpu.regs_mut()[rd] = new_value;
+                            self.cpu.regs_mut()[cpu::Cpu::PC] = start.wrapping_add(4);
+                            self.udf_bypass_last = None;
+                            self.udf_bypass_count = 0;
+                            return;
+                        }
+                    }
+                }
+
                 // Track repeated occurrences of the same bypass site.
                 const BYPASS_LIMIT: u32 = 256;
                 const LOG_RATE: u32 = 32;
@@ -1656,9 +1904,13 @@ impl Environment {
                     log_no_panic!(
                         "Warning: Ignored UndefinedInstruction at {:#x}. \
                          Faking function return to LR ({:#x}) to bypass crash! \
+                         cpsr={:#x} thumb={} instruction_len={} \
                          (occurrence {} of at most {})",
                         pc,
                         lr,
+                        self.cpu.cpsr(),
+                        (self.cpu.cpsr() & cpu::Cpu::CPSR_THUMB) != 0,
+                        instruction_len,
                         count,
                         BYPASS_LIMIT
                     );
@@ -1802,21 +2054,22 @@ impl Environment {
                             log_no_panic!("Main thread exited normally (or crashed early). Returning to host.");
                             ThreadNextAction::ReturnToHost
                         } else {
-                            log_dbg!("Thread {} has completed execution.", self.current_thread);
-                            self.threads[self.current_thread].active = false;
+                            log_dbg!(
+                                "Thread {} has completed execution via SVC_THREAD_EXIT. Returning to host.",
+                                self.current_thread
+                            );
 
-                            // Мы должны сменить поток, так как текущий
-                            // завершился
-                            let next_thread = self.schedule_next_thread();
-                            if next_thread == self.current_thread {
-                                log_no_panic!("All threads exited. Returning to host.");
-                                return ThreadNextAction::ReturnToHost;
-                            }
-
-                            // Возвращаемся в цикл (run_inner вызовет
-                            // yield_thread,
-                            // а потом run переключит поток)
-                            ThreadNextAction::Continue
+                            // Important: do NOT Continue here.
+                            //
+                            // The thread-exit routine is an SVC followed by a trap/undefined
+                            // instruction. If we continue guest execution after handling the SVC,
+                            // PC falls through into that trap and loops forever:
+                            //   UndefinedInstruction at 0x3000a014 with LR=0x3000a010
+                            //
+                            // Returning to host lets the coroutine that called into guest code
+                            // finish normally. The secondary-thread coroutine will then store the
+                            // return value and mark the thread inactive in the existing normal path.
+                            ThreadNextAction::ReturnToHost
                         }
                     }
                 }

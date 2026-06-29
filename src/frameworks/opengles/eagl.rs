@@ -20,7 +20,7 @@ use crate::gles::{
     create_gles1_ctx, create_gles2_ctx, create_gles3_ctx, gles1_on_gl2, GLESContext, GLES,
 };
 use crate::mem::MutPtr;
-use crate::objc::{id, msg, nil, objc_classes, release, retain, ClassExports, HostObject};
+use crate::objc::{id, msg, msg_class, nil, objc_classes, release, retain, ClassExports, HostObject};
 use crate::options::Options;
 use crate::Environment;
 use std::cell::RefCell;
@@ -341,67 +341,195 @@ pub const CLASSES: ClassExports = objc_classes! {
     let internalformat = gles11::RGBA8_OES;
 
     let (width, height) = {
-        let bounds: CGRect = msg![env; drawable bounds];
-        let CGSize { width, height } = bounds.size;
-        assert!((0.0..(u32::MAX as f32)).contains(&width));
-        assert!((0.0..(u32::MAX as f32)).contains(&height));
-        let scale_hack = env.options.scale_hack.get();
-        (width.round() as u32 * scale_hack, height.round() as u32 * scale_hack)
+        // ULTRAHLE_MINIONJUMP_RENDERBUFFER_BEGIN
+        if matches!(
+            env.bundle.bundle_identifier(),
+            "com.apprisetec9.minionjump" | "com.risinghighapps.kingdomprincepro"
+        ) {
+            log!("UltraHLE MinionJump: forcing EAGL renderbuffer storage to 1024x768");
+            (1024, 768)
+        } else {
+            let bounds: CGRect = msg![env; drawable bounds];
+            let CGSize { width, height } = bounds.size;
+
+            // Apple's `-renderbufferStorage:fromDrawable:` derives the
+            // renderbuffer size from the CAEAGLayer's bounds. Some apps (e.g.
+            // Beyond Gravity — HyperHLE log #1) momentarily present a layer
+            // whose `bounds.size` is bogus (non-finite, negative, or zero)
+            // during an unbind/rebind cycle while tearing down and recreating
+            // their EAGL surface. touchHLE used to `assert!` the size was in a
+            // sane range, which aborted the whole emulator. Real iOS never
+            // crashes here — it simply allocates a renderbuffer sized to the
+            // (screen-sized) drawable. Match that by falling back to the main
+            // screen's bounds when the drawable reports an invalid size.
+            let size_is_valid = |v: f32| v.is_finite() && (1.0..(u32::MAX as f32)).contains(&v);
+            let (width, height) = if size_is_valid(width) && size_is_valid(height) {
+                (width, height)
+            } else {
+                let screen: id = msg_class![env; UIScreen mainScreen];
+                let screen_bounds: CGRect = msg![env; screen bounds];
+                // Copy the fields out of the packed CGSize before using them
+                // (taking a reference to a packed struct field is UB / a
+                // compile error).
+                let fallback_width = screen_bounds.size.width;
+                let fallback_height = screen_bounds.size.height;
+                log!(
+                    "[renderbufferStorage:{:?} fromDrawable:{:?}] Warning: drawable \
+                     reported invalid bounds size {}x{}; falling back to main screen \
+                     bounds {}x{}",
+                    target,
+                    drawable,
+                    width,
+                    height,
+                    fallback_width,
+                    fallback_height
+                );
+                (fallback_width, fallback_height)
+            };
+            let scale_hack = env.options.scale_hack.get();
+
+            let mut width = width.round() as u32 * scale_hack;
+            let mut height = height.round() as u32 * scale_hack;
+
+            // If even the fallback produced a degenerate size, clamp to a
+            // minimum 1x1 so the GL call below cannot receive a zero extent.
+            width = width.max(1);
+            height = height.max(1);
+
+            if std::env::var_os("TOUCHHLE_FORCE_LANDSCAPE_RENDERBUFFER").is_some() {
+                let is_landscape = env
+                    .window
+                    .as_ref()
+                    .map(|window| {
+                        !matches!(
+                            window.current_rotation(),
+                            crate::window::DeviceOrientation::Portrait
+                        )
+                    })
+                    .unwrap_or(false);
+
+                if is_landscape && height > width {
+                    log!(
+                        "TOUCHHLE_FORCE_LANDSCAPE_RENDERBUFFER=1: swapping EAGL renderbuffer storage from {}x{} to {}x{}",
+                        width,
+                        height,
+                        height,
+                        width
+                    );
+                    std::mem::swap(&mut width, &mut height);
+                } else {
+                    log!(
+                        "TOUCHHLE_FORCE_LANDSCAPE_RENDERBUFFER=1: keeping EAGL renderbuffer storage at {}x{} (is_landscape={})",
+                        width,
+                        height,
+                        is_landscape
+                    );
+                }
+            }
+
+            (width, height)
+        }
+        // ULTRAHLE_MINIONJUMP_RENDERBUFFER_END
     };
 
-    let window = env.window.as_mut().expect("OpenGL ES is not supported in headless mode");
+    // Apple's documentation states that the receiver must be the current
+    // context when calling `renderbufferStorage:fromDrawable:`.  If no
+    // context is current for this thread but `this` has a valid backing GLES
+    // context, temporarily make `this` the current context so the GL call
+    // succeeds, then restore the previous state.  This matches the behaviour
+    // observed on real iOS where calling the method on a non-current context
+    // still works as long as the receiver has been initialised.
+    //
+    // Note: `window` must be borrowed from `env` AFTER any calls to
+    // `retain`/`release` because those also borrow `env` mutably.
+    let prior_ctx = *env.framework_state.opengles.current_ctx_for_thread(env.current_thread);
+    let needs_temp_current = prior_ctx.is_none() && {
+        env.objc.borrow::<EAGLContextHostObject>(this).gles_ctx.is_some()
+    };
+    if needs_temp_current {
+        log_dbg!(
+            "[EAGLContext renderbufferStorage:{:#x} fromDrawable:{:?}] \
+             no current context for thread {}; temporarily making this context current.",
+            target, drawable, env.current_thread
+        );
+        retain(env, this);
+        *env.framework_state.opengles.current_ctx_for_thread(env.current_thread) = Some(this);
+    }
 
-    let renderbuffer = {
-        // Unclear from documentation if this method requires an appropriate
-        // context to already be active, but that seems to be the case
-        // in practice?
-        let Some(mut gles) = super::sync_context(
+    // Run the actual GL storage allocation inside a nested scope so that
+    // `window` (which mutably borrows `env.window`) is dropped before we need
+    // to call `retain`/`release` with a full `&mut env` borrow below.
+    let renderbuffer_result: Option<u32> = {
+        let window = env.window.as_mut().expect("OpenGL ES is not supported in headless mode");
+        match super::sync_context(
             &mut env.framework_state.opengles,
             &mut env.objc,
             window,
             env.current_thread,
-        ) else {
-            log!(
-                "[EAGLContext renderbufferStorage:{:#x} fromDrawable:{:?}] \
-                 called with no current GL context for thread {}; failing \
-                 the call instead of crashing.",
-                target,
-                drawable,
-                env.current_thread
-            );
-            return false;
-        };
-        unsafe {
-            // Clear any pre-existing error so we can detect failure of the
-            // storage allocation reliably.
-            while gles.GetError() != gles11::NO_ERROR {}
-            gles.RenderbufferStorageOES(target, internalformat, width.try_into().unwrap(), height.try_into().unwrap());
-            if gles.GetError() != gles11::NO_ERROR {
-                // RGBA8 is optional in OpenGL ES 1.1 Common Profile (requires
-                // OES_rgb8_rgba8). Fall back to RGBA4 (0x8056) which is
-                // required by OES_framebuffer_object.
-                const GL_RGBA4: gles11::types::GLenum = 0x8056;
-                gles.RenderbufferStorageOES(
+        ) {
+            None => {
+                log!(
+                    "[EAGLContext renderbufferStorage:{:#x} fromDrawable:{:?}] \
+                     called with no current GL context for thread {}; failing \
+                     the call instead of crashing.",
                     target,
-                    GL_RGBA4,
-                    width.try_into().unwrap(),
-                    height.try_into().unwrap(),
+                    drawable,
+                    env.current_thread
                 );
-                if gles.GetError() != gles11::NO_ERROR {
+                None
+            }
+            Some(mut gles) => {
+                // Clear any pre-existing error so we can detect failure of the
+                // storage allocation reliably.
+                unsafe { while gles.GetError() != gles11::NO_ERROR {} }
+                unsafe { gles.RenderbufferStorageOES(target, internalformat, width.try_into().unwrap(), height.try_into().unwrap()); }
+                let needs_fallback = unsafe { gles.GetError() != gles11::NO_ERROR };
+                let alloc_ok = if needs_fallback {
+                    // RGBA8 is optional in OpenGL ES 1.1 Common Profile (requires
+                    // OES_rgb8_rgba8). Fall back to RGBA4 (0x8056) which is
+                    // required by OES_framebuffer_object.
+                    const GL_RGBA4: gles11::types::GLenum = 0x8056;
+                    unsafe { gles.RenderbufferStorageOES(target, GL_RGBA4, width.try_into().unwrap(), height.try_into().unwrap()); }
+                    unsafe { gles.GetError() == gles11::NO_ERROR }
+                } else {
+                    true
+                };
+                if !alloc_ok {
                     log!(
                         "[EAGLContext renderbufferStorage:{:#x} fromDrawable:{:?}] \
                          failed to allocate renderbuffer storage (tried RGBA8 and RGBA4)",
                         target,
                         drawable
                     );
-                    return false;
+                    None
+                } else {
+                    let mut renderbuffer: gles11::types::GLint = 0;
+                    unsafe { gles.GetIntegerv(gles11::RENDERBUFFER_BINDING_OES, &mut renderbuffer); }
+                    Some(renderbuffer as u32)
                 }
             }
-            let mut renderbuffer = 0;
-            gles.GetIntegerv(gles11::RENDERBUFFER_BINDING_OES, &mut renderbuffer);
-            renderbuffer as _
         }
     };
+
+    // `window` borrow dropped here — safe to use `retain`/`release` again.
+    // `None` means either no GL context was available, or storage allocation failed.
+    let renderbuffer = match renderbuffer_result {
+        None => {
+            if needs_temp_current {
+                *env.framework_state.opengles.current_ctx_for_thread(env.current_thread) = None;
+                release(env, this);
+            }
+            return false;
+        }
+        Some(rb) => rb,
+    };
+
+    // Restore the previous thread-local context (if we temporarily set `this`
+    // as the current context earlier in this call).
+    if needs_temp_current {
+        *env.framework_state.opengles.current_ctx_for_thread(env.current_thread) = None;
+        release(env, this);
+    }
 
     retain(env, drawable);
     let host_obj = env.objc.borrow_mut::<EAGLContextHostObject>(this);
@@ -1264,12 +1392,17 @@ unsafe fn present_renderbuffer(env: &mut Environment) {
     //        the EAGL layer's view hierarchy and apply it here, instead of
     //        using a device-family heuristic.
     let needs_autorotation_compensation =
-        matches!(device_family, crate::window::DeviceFamily::iPad)
+        device_family.is_ipad()
             && !matches!(
                 device_orientation,
                 crate::window::DeviceOrientation::Portrait
             );
-    let rotation_matrix = if needs_autorotation_compensation {
+    let rotation_matrix = if std::env::var_os("TOUCHHLE_DISABLE_PRESENT_ROTATION").is_some() {
+        log_once!(
+            "TOUCHHLE_DISABLE_PRESENT_ROTATION=1: presenting EAGL renderbuffer without texture rotation"
+        );
+        crate::matrix::Matrix::<2>::identity()
+    } else if needs_autorotation_compensation {
         env.window
             .as_mut()
             .unwrap()

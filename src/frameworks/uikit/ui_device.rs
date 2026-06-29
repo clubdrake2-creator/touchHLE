@@ -129,6 +129,15 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (UIDeviceOrientation)orientation {
+    // ULTRAHLE_MINIONJUMP_DEVICE_ORIENTATION_BEGIN
+    if matches!(
+        env.bundle.bundle_identifier(),
+        "com.apprisetec9.minionjump" | "com.risinghighapps.kingdomprincepro"
+    ) {
+        return UIDeviceOrientationLandscapeRight;
+    }
+    // ULTRAHLE_MINIONJUMP_DEVICE_ORIENTATION_END
+
     match env.window().current_rotation() {
         DeviceOrientation::Portrait      => UIDeviceOrientationPortrait,
         DeviceOrientation::PortraitUpsideDown => UIDeviceOrientationPortraitUpsideDown,
@@ -157,13 +166,47 @@ pub const CLASSES: ClassExports = objc_classes! {
 // MARK: - Identity
 
 - (id)model {
-    ns_string::get_static_str(env, "iPhone")
+    // ULTRAHLE_MINIONJUMP_MODEL_BEGIN
+    if matches!(
+        env.bundle.bundle_identifier(),
+        "com.apprisetec9.minionjump" | "com.risinghighapps.kingdomprincepro"
+    ) || std::env::var_os("TOUCHHLE_FORCE_IPAD_DEVICE_IDENTITY").is_some() {
+        return ns_string::get_static_str(env, "iPad");
+    }
+    // ULTRAHLE_MINIONJUMP_MODEL_END
+
+    let family = env.window().device_family();
+    let model = if family.is_ipad() {
+        "iPad"
+    } else if family.is_ipod_touch() {
+        "iPod touch"
+    } else {
+        "iPhone"
+    };
+    ns_string::get_static_str(env, model)
 }
 - (id)localizedModel {
     msg![env; this model]
 }
 - (id)name {
-    ns_string::get_static_str(env, "iPhone")
+    // ULTRAHLE_MINIONJUMP_NAME_BEGIN
+    if matches!(
+        env.bundle.bundle_identifier(),
+        "com.apprisetec9.minionjump" | "com.risinghighapps.kingdomprincepro"
+    ) || std::env::var_os("TOUCHHLE_FORCE_IPAD_DEVICE_IDENTITY").is_some() {
+        return ns_string::get_static_str(env, "iPad");
+    }
+    // ULTRAHLE_MINIONJUMP_NAME_END
+
+    let family = env.window().device_family();
+    let name = if family.is_ipad() {
+        "iPad"
+    } else if family.is_ipod_touch() {
+        "iPod touch"
+    } else {
+        "iPhone"
+    };
+    ns_string::get_static_str(env, name)
 }
 - (id)systemName {
     ns_string::get_static_str(env, "iPhone OS")
@@ -223,7 +266,20 @@ pub const CLASSES: ClassExports = objc_classes! {
 // MARK: - Idiom
 
 - (UIUserInterfaceIdiom)userInterfaceIdiom {
-    UIUserInterfaceIdiomPhone
+    // ULTRAHLE_MINIONJUMP_IDIOM_BEGIN
+    if matches!(
+        env.bundle.bundle_identifier(),
+        "com.apprisetec9.minionjump" | "com.risinghighapps.kingdomprincepro"
+    ) || std::env::var_os("TOUCHHLE_FORCE_IPAD_DEVICE_IDENTITY").is_some() {
+        return UIUserInterfaceIdiomPad;
+    }
+    // ULTRAHLE_MINIONJUMP_IDIOM_END
+
+    if env.window().device_family().is_ipad() {
+        UIUserInterfaceIdiomPad
+    } else {
+        UIUserInterfaceIdiomPhone
+    }
 }
 
 // MARK: - Capabilities
@@ -277,6 +333,16 @@ pub const CLASSES: ClassExports = objc_classes! {
 // MARK: - Hardware info
 
 - (id)platform {
+    // ULTRAHLE_MINIONJUMP_PLATFORM_BEGIN: force an iPad identity for apps that
+    // gate their iPad landscape render path on the reported hardware model.
+    if matches!(
+        env.bundle.bundle_identifier(),
+        "com.apprisetec9.minionjump" | "com.risinghighapps.kingdomprincepro"
+    ) || std::env::var_os("TOUCHHLE_FORCE_IPAD_DEVICE_IDENTITY").is_some() {
+        return ns_string::get_static_str(env, "iPad2,1");
+    }
+    // ULTRAHLE_MINIONJUMP_PLATFORM_END
+
     // Matches the sysctl hw.machine value for the emulated device family.
     // This must agree with sysctl/uname: apps with device whitelists (e.g.
     // BioShock) check the model through UIDevice categories like this one
@@ -286,6 +352,15 @@ pub const CLASSES: ClassExports = objc_classes! {
 }
 
 - (id)hwModel {
+    // ULTRAHLE_MINIONJUMP_HWMODEL_BEGIN
+    if matches!(
+        env.bundle.bundle_identifier(),
+        "com.apprisetec9.minionjump" | "com.risinghighapps.kingdomprincepro"
+    ) || std::env::var_os("TOUCHHLE_FORCE_IPAD_DEVICE_IDENTITY").is_some() {
+        return ns_string::get_static_str(env, "iPad2,1");
+    }
+    // ULTRAHLE_MINIONJUMP_HWMODEL_END
+
     let machine_name = env.window().device_family().machine_name();
     ns_string::get_static_str(env, machine_name)
 }
